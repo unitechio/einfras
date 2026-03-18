@@ -18,44 +18,58 @@ import {
   Play,
   Calendar,
   FileArchive,
+  Trash2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 
-// Mock Data for Restore List
-const backupHistory = [
-  {
-    id: 1,
-    name: "full-backup-2024-01-08.tar.gz",
-    size: "2.4 GB",
-    date: "2024-01-08 02:00",
-    type: "Full",
-    destination: "S3 Bucket",
-    status: "Success",
-  },
-  {
-    id: 2,
-    name: "inc-backup-2024-01-07.tar.gz",
-    size: "156 MB",
-    date: "2024-01-07 02:00",
-    type: "Incremental",
-    destination: "S3 Bucket",
-    status: "Success",
-  },
-  {
-    id: 3,
-    name: "inc-backup-2024-01-06.tar.gz",
-    size: "142 MB",
-    date: "2024-01-06 02:00",
-    type: "Incremental",
-    destination: "Local",
-    status: "Warning",
-  },
-];
+import { useServerBackups, useCreateBackup, useRestoreBackup, useDeleteBackup } from "../../../api/useServerHooks";
+import { useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 
 export default function ServerBackup() {
+  const { serverId } = useParams<{ serverId: string }>();
+  const qc = useQueryClient();
+
+  // Real Hooks
+  const { data: backupsData, isLoading } = useServerBackups(serverId || "");
+  const { mutateAsync: createBackup, isPending: isCreating } = useCreateBackup(serverId || "");
+  const { mutateAsync: restoreBackup } = useRestoreBackup();
+  const { mutateAsync: deleteBackup } = useDeleteBackup(serverId || "");
+
+  const backups = backupsData || [];
+
+  const handleRunBackup = async () => {
+    try {
+      await createBackup({ label: `Manual Backup ${new Date().toLocaleString()}` });
+    } catch (error) {
+      console.error("Failed to create backup", error);
+    }
+  };
+
+  const handleRestore = async (backupId: string) => {
+    if (confirm("Are you sure you want to restore from this backup? This will overwrite existing data.")) {
+        try {
+            await restoreBackup(backupId);
+            alert("Restore initiated successfully");
+        } catch (error) {
+            console.error("Failed to restore backup", error);
+        }
+    }
+  };
+
+  const handleDelete = async (backupId: string) => {
+    if (confirm("Are you sure you want to delete this backup?")) {
+        try {
+            await deleteBackup(backupId);
+        } catch (error) {
+            console.error("Failed to delete backup", error);
+        }
+    }
+  }
+
   const [scheduleType, setScheduleType] = useState("daily");
 
   // Destinations State
@@ -86,9 +100,14 @@ export default function ServerBackup() {
             <FileText size={16} className="mr-2" />
             View Logs
           </Button>
-          <Button variant="primary" className="shadow-sm">
-            <Play size={16} className="mr-2" />
-            Run Backup Now
+          <Button 
+            variant="primary" 
+            className="shadow-sm"
+            onClick={handleRunBackup}
+            disabled={isCreating}
+          >
+            <Play size={16} className={isCreating ? "animate-pulse mr-2" : "mr-2"} />
+            {isCreating ? "Backing up..." : "Run Backup Now"}
           </Button>
         </div>
       </div>
@@ -507,47 +526,62 @@ export default function ServerBackup() {
             </div>
 
             <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1 no-scrollbar">
-              {backupHistory.map((backup) => (
-                <div
-                  key={backup.id}
-                  className="group p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/30 rounded-xl border border-transparent hover:border-zinc-200/60 dark:hover:border-zinc-700/60 transition-all cursor-pointer"
-                >
-                  <div className="flex justify-between items-center mb-2">
-                    <span
-                      className={cn(
-                        "px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider",
-                        backup.type === "Full"
-                          ? "bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400"
-                          : "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400",
-                      )}
-                    >
-                      {backup.type}
-                    </span>
-                    <span className="text-[11px] font-mono text-zinc-500">
-                      {backup.size}
-                    </span>
-                  </div>
+              {isLoading ? (
+                <div className="p-12 text-center text-sm font-medium text-zinc-500 animate-pulse">
+                    Loading backups...
+                </div>
+              ) : backups.length === 0 ? (
+                <div className="p-12 text-center text-sm font-medium text-zinc-500">
+                    No backups found
+                </div>
+              ) : (
+                backups.map((backup) => (
                   <div
-                    className="font-semibold text-[14px] text-zinc-900 dark:text-zinc-100 mb-2 truncate"
-                    title={backup.name}
+                    key={backup.id}
+                    className="group p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/30 rounded-xl border border-transparent hover:border-zinc-200/60 dark:hover:border-zinc-700/60 transition-all cursor-pointer"
                   >
-                    {backup.name}
-                  </div>
-                  <div className="flex justify-between items-center text-[12px] text-zinc-500 font-medium">
-                    <span className="flex items-center gap-1.5">
-                      <Clock size={12} /> {backup.date}
-                    </span>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:text-blue-400 dark:hover:bg-blue-900/20" title="Restore">
-                        <Upload size={14} />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:text-emerald-400 dark:hover:bg-emerald-900/20" title="Download">
-                        <Download size={14} />
-                      </Button>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400">
+                        Full
+                      </span>
+                      <span className="text-[11px] font-mono text-zinc-500">
+                        {backup.size ? `${(backup.size / 1024 / 1024).toFixed(1)} MB` : "0 MB"}
+                      </span>
+                    </div>
+                    <div
+                      className="font-semibold text-[14px] text-zinc-900 dark:text-zinc-100 mb-2 truncate"
+                      title={backup.label || backup.path}
+                    >
+                      {backup.label || backup.path || "Untitled Backup"}
+                    </div>
+                    <div className="flex justify-between items-center text-[12px] text-zinc-500 font-medium">
+                      <span className="flex items-center gap-1.5">
+                        <Clock size={12} /> {new Date(backup.created_at).toLocaleString()}
+                      </span>
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-6 w-6 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:text-blue-400 dark:hover:bg-blue-900/20" 
+                            title="Restore"
+                            onClick={(e) => { e.stopPropagation(); handleRestore(backup.id); }}
+                        >
+                          <Upload size={14} />
+                        </Button>
+                        <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-6 w-6 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20" 
+                            title="Delete"
+                            onClick={(e) => { e.stopPropagation(); handleDelete(backup.id); }}
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </div>

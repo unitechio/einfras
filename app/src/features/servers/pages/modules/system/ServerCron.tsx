@@ -1,6 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
-import type { CronJob, CronExecutionLog } from "@/features/cron/cronService";
-import { cronService } from "@/features/cron/cronService";
+import { useState } from "react";
 import { Plus, Play, Trash2, Edit2, RotateCcw } from "lucide-react";
 import { CronStatusBadge } from "@/features/cron/components/CronStatusBadge";
 import { CronNextRun } from "@/features/cron/components/CronNextRun";
@@ -10,50 +8,55 @@ import { cn } from "@/lib/utils";
 import { Link, useParams } from "react-router-dom";
 import { Button } from "@/shared/ui/Button";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/shared/ui/Table";
+import { useServerCron, useDeleteCronJob, useUpdateCronJob, useExecuteCronJob, useCronHistory } from "../../../api/useServerHooks";
+import { useQueryClient } from "@tanstack/react-query";
 
 export default function ServerCron() {
-  const { serverId } = useParams();
-  const [jobs, setJobs] = useState<CronJob[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { serverId } = useParams<{ serverId: string }>();
+  const qc = useQueryClient();
+
+  // Real Hooks
+  const { data: jobsData, isLoading } = useServerCron(serverId || "");
+  const { mutateAsync: deleteJob } = useDeleteCronJob(serverId || "");
+  const { mutateAsync: updateJob } = useUpdateCronJob();
+  const { mutateAsync: executeJob } = useExecuteCronJob();
+
+  const jobs = jobsData || [];
   const [runningJobs, setRunningJobs] = useState<Set<string>>(new Set());
 
   // Drawer State
-  const [selectedJobIdForLogs, setSelectedJobIdForLogs] = useState<
-    string | null
-  >(null);
-  const [logs, setLogs] = useState<CronExecutionLog[]>([]);
+  const [selectedJobIdForLogs, setSelectedJobIdForLogs] = useState<string | null>(null);
+  const [selectedJobTitle, setSelectedJobTitle] = useState("");
 
-  const loadJobs = useCallback(() => {
-    const data = cronService.getJobs();
-    setJobs(data);
-    setIsLoading(false);
-  }, []);
-
-  useEffect(() => {
-    loadJobs();
-    // Refresh periodically for "next run" updates
-    const interval = setInterval(loadJobs, 60000);
-    return () => clearInterval(interval);
-  }, [loadJobs]);
-
-  const handleToggle = (id: string, enabled: boolean) => {
-    cronService.toggleJob(id, enabled);
-    loadJobs();
+  const handleToggle = async (id: string, enabled: boolean) => {
+    try {
+      await updateJob({ id, body: { enabled } });
+    } catch (error) {
+      console.error("Failed to toggle cron job", error);
+    }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm("Are you sure you want to delete this cron job?")) {
-      cronService.deleteJob(id);
-      loadJobs();
+      try {
+        await deleteJob(id);
+      } catch (error) {
+        console.error("Failed to delete cron job", error);
+      }
     }
   };
 
   const handleRunNow = async (id: string) => {
-    setRunningJobs((prev) => new Set(prev).add(id));
+    setRunningJobs((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
     try {
-      await cronService.runJob(id);
-      cronService.getJobs(); // Refresh status immediately in service if persisted
-      loadJobs(); // Refresh UI
+      await executeJob(id);
+      qc.invalidateQueries({ queryKey: ["servers", "cron", serverId] });
+    } catch (error) {
+      console.error("Failed to execute cron job", error);
     } finally {
       setRunningJobs((prev) => {
         const next = new Set(prev);
@@ -63,11 +66,12 @@ export default function ServerCron() {
     }
   };
 
-  const handleOpenLogs = (job: CronJob) => {
-    const jobLogs = cronService.getLogs(job.id);
-    setLogs(jobLogs);
+  const handleOpenLogs = (job: any) => {
+    setSelectedJobTitle(job.name || "Untitled Job");
     setSelectedJobIdForLogs(job.id);
   };
+
+  const { data: historyLogs } = useCronHistory(selectedJobIdForLogs || "");
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -83,9 +87,7 @@ export default function ServerCron() {
             Manage scheduled tasks and background workers
           </p>
         </div>
-        <Link
-          to={`/servers/${serverId}/cron/new`}
-        >
+        <Link to={`/servers/${serverId}/cron/new`}>
           <Button variant="primary" className="shadow-sm">
             <Plus size={16} className="mr-2" />
             <span>Add Job</span>
@@ -116,7 +118,10 @@ export default function ServerCron() {
               </TableRow>
             ) : jobs.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-48 text-center text-sm font-medium text-zinc-500 dark:text-zinc-400">
+                <TableCell
+                  colSpan={6}
+                  className="h-48 text-center text-sm font-medium text-zinc-500 dark:text-zinc-400"
+                >
                   No cron jobs configured
                 </TableCell>
               </TableRow>
@@ -133,14 +138,14 @@ export default function ServerCron() {
                 >
                   <TableCell className="text-center">
                     <Switch
-                      checked={job.enabled}
+                      checked={!!job.enabled}
                       onCheckedChange={(c) => handleToggle(job.id, c)}
                     />
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col gap-1">
                       <span className="font-semibold text-[14px] text-zinc-900 dark:text-white">
-                        {job.title}
+                        {job.name || "Untitled Job"}
                       </span>
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-[11px] font-bold bg-zinc-100 dark:bg-[#1A1A1A] px-1.5 py-0.5 rounded text-zinc-600 dark:text-zinc-400 border border-zinc-200/50 dark:border-zinc-800/50 shadow-sm">
@@ -159,17 +164,17 @@ export default function ServerCron() {
                     {runningJobs.has(job.id) ? (
                       <CronStatusBadge status="running" />
                     ) : (
-                      <CronStatusBadge status={job.lastRunStatus || "idle"} />
+                      <CronStatusBadge status="idle" />
                     )}
                   </TableCell>
                   <TableCell>
-                    {job.lastRunAt ? (
+                    {job.last_run ? (
                       <div className="flex flex-col gap-0.5">
                         <span className="text-[13px] font-medium text-zinc-700 dark:text-zinc-300">
-                          {new Date(job.lastRunAt).toLocaleTimeString()}
+                          {new Date(job.last_run).toLocaleTimeString()}
                         </span>
                         <span className="text-[11px] text-zinc-400">
-                          {new Date(job.lastRunAt).toLocaleDateString()}
+                          {new Date(job.last_run).toLocaleDateString()}
                         </span>
                       </div>
                     ) : (
@@ -177,7 +182,7 @@ export default function ServerCron() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <CronNextRun nextRunAt={job.nextRunAt} />
+                    <CronNextRun nextRunAt={job.next_run} />
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -191,9 +196,7 @@ export default function ServerCron() {
                       >
                         <Play
                           size={14}
-                          className={
-                            runningJobs.has(job.id) ? "animate-pulse" : ""
-                          }
+                          className={runningJobs.has(job.id) ? "animate-pulse" : ""}
                           fill="currentColor"
                         />
                       </Button>
@@ -209,7 +212,7 @@ export default function ServerCron() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => window.location.href = `/servers/${serverId}/cron/${job.id}/edit`}
+                        onClick={() => (window.location.href = `/servers/${serverId}/cron/${job.id}/edit`)}
                         className="text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-100 dark:hover:bg-zinc-800"
                         title="Edit"
                       >
@@ -236,8 +239,16 @@ export default function ServerCron() {
       <CronLogDrawer
         isOpen={!!selectedJobIdForLogs}
         onClose={() => setSelectedJobIdForLogs(null)}
-        jobTitle={jobs.find((j) => j.id === selectedJobIdForLogs)?.title || ""}
-        logs={logs}
+        jobTitle={selectedJobTitle}
+        logs={
+          historyLogs?.map((l) => ({
+            id: l.id,
+            status: l.status as any,
+            output: l.output || "",
+            executedAt: l.executed_at,
+            durationMs: l.duration_ms || 0,
+          })) || []
+        }
       />
     </div>
   );

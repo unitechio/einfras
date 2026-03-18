@@ -84,11 +84,13 @@ export default function AddServerPage() {
           os: formData.os as any,
           ip_address: formData.ip,
           status: "online",
-          cpu_cores: 4,
-          memory_gb: 16,
-          disk_gb: 100,
+          cpu_cores: 1, // Default, will be updated by health check/sync
+          memory_gb: 0,
+          disk_gb: 0,
           ssh_port: parseInt(formData.port) || 22,
           ssh_user: formData.privilege.user,
+          ssh_password: formData.authMethod === "password" ? formData.credential.value : undefined,
+          ssh_key_path: formData.authMethod === "ssh_key" ? formData.credential.value : undefined, // Assuming value is path for simplicity in this flow
           tunnel_enabled: formData.mode === "bastion",
           tunnel_host: formData.bastionHost,
         });

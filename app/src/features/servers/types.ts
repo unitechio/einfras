@@ -13,9 +13,17 @@ export interface Server {
   provider?: string;
   ssh_port: number;
   ssh_user: string;
+  ssh_password?: string;
+  ssh_key_path?: string;
   tunnel_enabled: boolean;
   tunnel_host?: string;
   tunnel_port?: number;
+  tags?: string[];
+  metrics?: {
+    cpu_usage?: number;
+    memory_usage?: number;
+    container_count?: number;
+  };
   created_at?: string;
   updated_at?: string;
 }

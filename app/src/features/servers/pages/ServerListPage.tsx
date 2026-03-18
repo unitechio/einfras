@@ -17,94 +17,16 @@ import {
   ChevronDown,
   X,
   Check,
+  AlertCircle,
+  Loader2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { useServers } from "../api/useServers";
+import { useServerHealthCheck } from "../api/useServerHooks";
+import { Button } from "@/shared/ui/Button";
 
-// Mock Data
-const servers = [
-  {
-    id: 1,
-    name: "local",
-    ip: "192.168.1.10",
-    os: "linux",
-    type: "Docker",
-    status: "Up",
-    lastCheckin: "2026-01-08 14:47:37",
-    agentVersion: "2.19.4",
-    socket: "/var/run/docker.sock",
-    group: "Unassigned",
-    tags: [],
-    metrics: {
-      stacks: 3,
-      containers: {
-        total: 7,
-        running: 7,
-        stopped: 0,
-        healthy: 0,
-        unhealthy: 0,
-      },
-      volumes: 1,
-      images: 6,
-      cpu: "1 CPU",
-      ram: "2.1 GB RAM",
-    },
-  },
-  {
-    id: 2,
-    name: "production-db",
-    ip: "10.0.0.5",
-    os: "linux",
-    type: "Kubernetes",
-    status: "Up",
-    lastCheckin: "2026-01-08 14:45:12",
-    agentVersion: "2.19.4",
-    socket: "tcp://10.0.0.5:2375",
-    group: "Production",
-    tags: ["db", "high-priority"],
-    metrics: {
-      stacks: 12,
-      containers: {
-        total: 45,
-        running: 42,
-        stopped: 3,
-        healthy: 40,
-        unhealthy: 2,
-      },
-      volumes: 15,
-      images: 24,
-      cpu: "8 CPU",
-      ram: "32 GB RAM",
-    },
-  },
-  {
-    id: 3,
-    name: "windows-ad",
-    ip: "192.168.1.15",
-    os: "windows",
-    type: "Agent",
-    status: "Down",
-    lastCheckin: "2026-01-07 10:22:00",
-    agentVersion: "2.16.0",
-    socket: "-",
-    group: "Infrastructure",
-    tags: ["windows", "ad"],
-    metrics: {
-      stacks: 0,
-      containers: {
-        total: 0,
-        running: 0,
-        stopped: 0,
-        healthy: 0,
-        unhealthy: 0,
-      },
-      volumes: 0,
-      images: 0,
-      cpu: "4 CPU",
-      ram: "8 GB RAM",
-    },
-  },
-];
+// Mock Data removed - using real data via useServers
 
 // Reusable Filter Dropdown Component
 function FilterDropdown({
@@ -212,9 +134,103 @@ const FILTER_OPTIONS = {
   "Agent Version": ["2.19.4", "2.19.3", "2.16.0", "Legacy"],
 };
 
+const ServerHealthCheckButton = ({ serverId }: { serverId: string }) => {
+  const { mutate, isPending } = useServerHealthCheck();
+
+  return (
+    <button
+      onClick={() => mutate(serverId)}
+      disabled={isPending}
+      className={cn(
+        "flex items-center justify-center gap-2 px-3 py-2 rounded-sm cursor-pointer  bg-red-50 hover:bg-red-100 dark:bg-red-900/10 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 text-xs font-bold transition-colors disabled:opacity-50",
+      )}
+      title="Run health check"
+    >
+      {isPending ? <RefreshCw size={14} className="animate-spin" /> : <Power size={14} />}
+    </button>
+  );
+};
+
 export default function ServerListPage() {
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+    isRefetching
+  } = useServers({
+    page,
+    page_size: pageSize,
+    search: searchTerm
+  });
+
+  const servers = data?.data || [];
+
+  const handleRefresh = () => {
+    refetch();
+  };
+
+  if (isLoading && !isRefetching) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
+        <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
+        <p className="text-sm font-medium text-zinc-500">Loading infrastructure nodes...</p>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] gap-4 animate-in fade-in duration-500">
+        <div className="w-20 h-20 bg-red-50 dark:bg-red-900/10 rounded-full flex items-center justify-center border border-red-100 dark:border-red-900/20 shadow-sm">
+          <AlertCircle className="w-10 h-10 text-red-500" />
+        </div>
+        <div className="text-center space-y-1">
+          <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Failed to load servers</h2>
+          <p className="text-sm text-zinc-500 max-w-[300px]">Please check your backend connection or infrastructure status and try again.</p>
+        </div>
+        <Button 
+          variant="primary" 
+          onClick={() => refetch()}
+          className="mt-2"
+        >
+          <RefreshCw size={16} className="mr-2" />
+          Try Again
+        </Button>
+      </div>
+    );
+  }
+
+  if (servers.length === 0 && !searchTerm) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[500px] gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+        <div className="relative">
+          <div className="w-24 h-24 bg-zinc-100 dark:bg-zinc-800/50 rounded-3xl flex items-center justify-center border border-zinc-200/50 dark:border-zinc-700/50 shadow-inner">
+            <Server className="w-12 h-12 text-zinc-400 dark:text-zinc-500" />
+          </div>
+          <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-white dark:bg-zinc-900 rounded-2xl flex items-center justify-center shadow-lg border border-zinc-100 dark:border-zinc-800">
+            <Plus className="w-5 h-5 text-blue-500" />
+          </div>
+        </div>
+        <div className="text-center space-y-2">
+          <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">No Environments Found</h2>
+          <p className="text-[15px] text-zinc-500 max-w-[350px] leading-relaxed">
+            Every great journey starts with a single node. Link your first server to begin monitoring your infrastructure.
+          </p>
+        </div>
+        <Link to="/servers/add">
+          <Button variant="primary" className="px-8 h-11 text-sm font-bold shadow-xl shadow-blue-500/20 transition-all hover:scale-105 active:scale-95">
+            <Plus size={18} className="mr-2" /> Add Your First Node
+          </Button>
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20">
@@ -249,9 +265,13 @@ export default function ServerListPage() {
             />
           </div>
 
-          <button className="bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-sm cursor-pointer  text-xs font-bold flex items-center gap-2 transition-all border border-zinc-200 dark:border-zinc-700 shadow-sm">
-            <RefreshCw size={14} />
-            <span>Sync</span>
+          <button 
+            onClick={handleRefresh}
+            disabled={isRefetching}
+            className="bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-sm cursor-pointer  text-xs font-bold flex items-center gap-2 transition-all border border-zinc-200 dark:border-zinc-700 shadow-sm disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={cn(isRefetching && "animate-spin")} />
+            <span>{isRefetching ? "Syncing..." : "Sync"}</span>
           </button>
 
           <Link to="/servers/add">
@@ -354,10 +374,10 @@ export default function ServerListPage() {
                   <div
                     className={cn(
                       "absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white dark:border-zinc-900 flex items-center justify-center",
-                      server.status === "Up" ? "bg-green-500" : "bg-red-500",
+                      server.status === "online" ? "bg-green-500" : server.status === "error" ? "bg-red-500" : "bg-zinc-400",
                     )}
                   >
-                    {server.status === "Up" ? (
+                    {server.status === "online" ? (
                       <Check size={10} className="text-white" />
                     ) : (
                       <X size={10} className="text-white" />
@@ -377,7 +397,7 @@ export default function ServerListPage() {
                       </Link>
                       <div className="flex items-center gap-2">
                         <span className="px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 text-[10px] font-bold uppercase tracking-wider">
-                          {server.ip}
+                          {server.ip_address}
                         </span>
                       </div>
                     </div>
@@ -385,18 +405,10 @@ export default function ServerListPage() {
                     <div className="flex items-center gap-4 text-xs text-zinc-500 font-medium">
                       <div
                         className="flex items-center gap-1.5"
-                        title="Last Check-in"
+                        title="Last Updated"
                       >
                         <Activity size={14} className="text-zinc-400" />
-                        {server.lastCheckin}
-                      </div>
-                      <div className="h-3 w-px bg-zinc-200 dark:bg-zinc-700" />
-                      <div
-                        className="flex items-center gap-1.5"
-                        title="Agent Version"
-                      >
-                        <Terminal size={14} className="text-zinc-400" />v
-                        {server.agentVersion}
+                        {server.updated_at ? new Date(server.updated_at).toLocaleString() : "Never"}
                       </div>
                     </div>
                   </div>
@@ -405,16 +417,16 @@ export default function ServerListPage() {
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-zinc-400">Type:</span>
                       <span className="font-medium text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-800/50 px-2 py-0.5 rounded border border-zinc-100 dark:border-zinc-800">
-                        {server.type}
+                        {server.tunnel_enabled ? "Tunnel" : "Direct SSH"}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-zinc-400">Group:</span>
+                      <span className="font-bold text-zinc-400">OS:</span>
                       <span className="font-medium text-zinc-700 dark:text-zinc-300">
-                        {server.group}
+                        {server.os} {server.os_version}
                       </span>
                     </div>
-                    {server.tags.length > 0 && (
+                    {server.tags && server.tags.length > 0 && (
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-zinc-400 absolute md:static opacity-0 md:opacity-100">
                           Tags:
@@ -440,35 +452,26 @@ export default function ServerListPage() {
                     <div className="flex items-center gap-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400">
                       <Layers size={14} className="text-zinc-400 shrink-0" />
                       <span className="whitespace-nowrap">
-                        {server.metrics.stacks} stacks
+                        0 stacks
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400">
                       <Box size={14} className="text-zinc-400 shrink-0" />
                       <span className="text-zinc-900 dark:text-white font-bold">
-                        {server.metrics.containers.total}
+                        {server.metrics?.container_count || 0}
                       </span>
                       <span className="hidden sm:inline">containers</span>
-                      <div className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 rounded text-[10px]">
-                        <span className="text-green-600 dark:text-green-500 font-bold">
-                          {server.metrics.containers.running}
-                        </span>
-                        <span className="text-zinc-300">/</span>
-                        <span className="text-zinc-400">
-                          {server.metrics.containers.stopped}
-                        </span>
-                      </div>
                     </div>
 
                     <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-700 hidden md:block" />
 
                     <div className="flex items-center gap-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400">
                       <Cpu size={14} className="text-zinc-400 shrink-0" />
-                      {server.metrics.cpu}
+                      {server.cpu_cores} Cores
                     </div>
                     <div className="flex items-center gap-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400">
                       <Activity size={14} className="text-zinc-400 shrink-0" />
-                      {server.metrics.ram}
+                      {server.memory_gb} GB RAM
                     </div>
                   </div>
                 </div>
@@ -476,9 +479,7 @@ export default function ServerListPage() {
                 {/* Actions */}
                 <div className="flex md:flex-col gap-2 border-l border-zinc-100 dark:border-zinc-800/50 pl-4 md:pl-0 md:border-none min-w-[140px]">
                   <div className="grid grid-cols-2 gap-2 w-full">
-                    <button className="flex items-center justify-center gap-2 px-3 py-2 rounded-sm cursor-pointer  bg-red-50 hover:bg-red-100 dark:bg-red-900/10 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 text-xs font-bold transition-colors">
-                      <Power size={14} />
-                    </button>
+                    <ServerHealthCheckButton serverId={server.id} />
                     <button className="flex items-center justify-center gap-2 px-3 py-2 rounded-sm cursor-pointer  bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 text-xs font-bold transition-colors">
                       <Settings size={14} />
                     </button>
@@ -515,9 +516,9 @@ export default function ServerListPage() {
                         <div
                           className={cn(
                             "absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white dark:border-zinc-900",
-                            server.status === "Up"
+                            server.status === "online"
                               ? "bg-green-500"
-                              : "bg-red-500",
+                              : server.status === "error" ? "bg-red-500" : "bg-zinc-400",
                           )}
                         />
                       </div>
@@ -529,7 +530,7 @@ export default function ServerListPage() {
                           {server.name}
                         </Link>
                         <div className="flex items-center gap-2 text-xs text-zinc-500 font-mono">
-                          {server.ip}
+                          {server.ip_address}
                         </div>
                       </div>
                     </div>
@@ -541,9 +542,9 @@ export default function ServerListPage() {
                       <span
                         className={cn(
                           "px-2 py-0.5 text-[10px] font-bold uppercase rounded-md",
-                          server.status === "Up"
+                          server.status === "online"
                             ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                            : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+                            : server.status === "error" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-zinc-100 text-zinc-600",
                         )}
                       >
                         {server.status}
@@ -554,13 +555,13 @@ export default function ServerListPage() {
                       <div className="flex justify-between text-xs items-center">
                         <span className="text-zinc-500 font-medium">CPU</span>
                         <span className="font-bold text-zinc-700 dark:text-zinc-300 font-mono">
-                          {server.metrics.cpu}
+                          {server.cpu_cores} Cores
                         </span>
                       </div>
                       <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
                         <div
                           className="bg-blue-500 h-full rounded-full"
-                          style={{ width: "45%" }}
+                          style={{ width: "0%" }}
                         ></div>
                       </div>
                     </div>
@@ -570,13 +571,13 @@ export default function ServerListPage() {
                           Memory
                         </span>
                         <span className="font-bold text-zinc-700 dark:text-zinc-300 font-mono">
-                          {server.metrics.ram}
+                          {server.memory_gb} GB RAM
                         </span>
                       </div>
                       <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
                         <div
                           className="bg-purple-500 h-full rounded-full"
-                          style={{ width: "60%" }}
+                          style={{ width: "0%" }}
                         ></div>
                       </div>
                     </div>
@@ -587,11 +588,7 @@ export default function ServerListPage() {
                       </span>
                       <div className="flex items-center gap-1 font-mono">
                         <span className="text-green-600 font-bold">
-                          {server.metrics.containers.running}
-                        </span>
-                        <span className="text-zinc-300">/</span>
-                        <span className="text-zinc-500">
-                          {server.metrics.containers.total}
+                          {server.metrics?.container_count || 0}
                         </span>
                       </div>
                     </div>
@@ -605,9 +602,7 @@ export default function ServerListPage() {
                   >
                     <Activity size={16} /> Open Dashboard
                   </Link>
-                  <button className="p-2.5 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-400 rounded-sm cursor-pointer  transition-colors">
-                    <Settings size={18} />
-                  </button>
+                  <ServerHealthCheckButton serverId={server.id} />
                 </div>
               </div>
             ))}
@@ -621,10 +616,14 @@ export default function ServerListPage() {
           <span className="text-xs font-bold text-zinc-500 uppercase tracking-tighter">
             Rows per page
           </span>
-          <select className="bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-sm px-2 py-1.5 text-xs font-bold outline-none cursor-pointer hover:border-blue-500 transition-colors">
-            <option>10</option>
-            <option>25</option>
-            <option>50</option>
+          <select 
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            className="bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-sm px-2 py-1.5 text-xs font-bold outline-none cursor-pointer hover:border-blue-500 transition-colors"
+          >
+            <option value={10}>10</option>
+            <option value={20}>25</option>
+            <option value={50}>50</option>
           </select>
         </div>
         <div className="text-xs text-zinc-500 font-medium">
@@ -635,10 +634,18 @@ export default function ServerListPage() {
           of {servers.length}
         </div>
         <div className="flex gap-1">
-          <button className="p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 disabled:opacity-50">
+          <button 
+            disabled={page <= 1}
+            onClick={() => setPage(p => p - 1)}
+            className="p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 disabled:opacity-50"
+          >
             <ChevronDown className="rotate-90" size={16} />
           </button>
-          <button className="p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 disabled:opacity-50">
+          <button 
+            disabled={!data?.total || page * pageSize >= data.total}
+            onClick={() => setPage(p => p + 1)}
+            className="p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 disabled:opacity-50"
+          >
             <ChevronDown className="-rotate-90" size={16} />
           </button>
         </div>

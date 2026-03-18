@@ -1,20 +1,19 @@
-import { useState, useEffect } from "react";
-import { mockSecurityService } from "../shared/mockServerService";
+import { useServerNetworkInterfaces } from "../../../api/useServerHooks";
+import { useParams } from "react-router-dom";
 import { Network, ArrowUp, ArrowDown } from "lucide-react";
 
 export default function ServerNetwork() {
-  const [interfaces, setInterfaces] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { serverId } = useParams<{ serverId: string }>();
+  const { data: interfacesData, isLoading } = useServerNetworkInterfaces(serverId || "");
+  const interfaces = interfacesData || [];
 
-  useEffect(() => {
-    const loadNetwork = async () => {
-      setLoading(true);
-      const data = await (mockSecurityService as any).getNetworkInterfaces();
-      setInterfaces(data);
-      setLoading(false);
-    };
-    loadNetwork();
-  }, []);
+  const formatBytes = (bytes: number) => {
+    if (!bytes) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -33,7 +32,7 @@ export default function ServerNetwork() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {loading ? (
+        {isLoading ? (
              [...Array(3)].map((_, i) => (
                <div key={i} className="bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl p-6 shadow-sm min-h-[220px] isolate overflow-hidden animate-pulse">
                </div>
@@ -41,7 +40,7 @@ export default function ServerNetwork() {
         ) : (
           interfaces.map((iface) => (
             <div
-              key={iface.name}
+              key={iface.id || iface.name}
               className="bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl p-6 shadow-sm hover:shadow-md transition-all group"
             >
               <div className="flex justify-between items-start mb-6">
@@ -53,12 +52,16 @@ export default function ServerNetwork() {
                     <h3 className="font-bold tracking-tight text-zinc-900 dark:text-zinc-50 text-[15px]">
                       {iface.name}
                     </h3>
-                    <span className="text-[11px] font-mono text-zinc-500">{iface.mac}</span>
+                    <span className="text-[11px] font-mono text-zinc-500">{iface.mac_address}</span>
                   </div>
                 </div>
-                <span className="px-2 py-0.5 border border-emerald-200/60 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold tracking-wider uppercase rounded-full flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                  {iface.status}
+                <span className={`px-2 py-0.5 border text-[10px] font-bold tracking-wider uppercase rounded-full flex items-center gap-1.5 ${
+                    iface.is_up 
+                    ? "border-emerald-200/60 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
+                    : "border-red-200/60 dark:border-red-800/60 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400"
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${iface.is_up ? "bg-emerald-500" : "bg-red-500"}`}></span>
+                  {iface.is_up ? "UP" : "DOWN"}
                 </span>
               </div>
 
@@ -66,13 +69,13 @@ export default function ServerNetwork() {
                 <div className="flex justify-between items-center text-[12px] border-b border-zinc-100 dark:border-zinc-800/60 pb-2">
                   <span className="font-medium text-zinc-500">IP Address</span>
                   <span className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">
-                    {iface.ip}
+                    {iface.ip_address || "-"}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-[12px] border-b border-zinc-100 dark:border-zinc-800/60 pb-2">
                   <span className="font-medium text-zinc-500">Netmask</span>
                   <span className="font-mono text-zinc-600 dark:text-zinc-400">
-                    {iface.mask}
+                    {iface.netmask || "-"}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-4 pt-4">
@@ -81,7 +84,7 @@ export default function ServerNetwork() {
                       <ArrowDown size={14} className="text-emerald-500" /> RX
                     </div>
                     <div className="text-[15px] tracking-tight font-bold text-zinc-900 dark:text-zinc-50">
-                      {iface.rx}
+                      {formatBytes(iface.bytes_received)}
                     </div>
                   </div>
                   <div className="bg-zinc-50/50 dark:bg-[#1A1A1A] rounded-lg p-3 border border-zinc-100 dark:border-zinc-800/60">
@@ -89,7 +92,7 @@ export default function ServerNetwork() {
                       <ArrowUp size={14} className="text-blue-500" /> TX
                     </div>
                     <div className="text-[15px] tracking-tight font-bold text-zinc-900 dark:text-zinc-50">
-                      {iface.tx}
+                      {formatBytes(iface.bytes_sent)}
                     </div>
                   </div>
                 </div>

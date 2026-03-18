@@ -1,0 +1,4 @@
+
+ALTER TABLE images
+ADD COLUMN webp_path VARCHAR(255),
+ADD COLUMN thumbnail_path VARCHAR(255);

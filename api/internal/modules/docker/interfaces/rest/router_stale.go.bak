@@ -1,0 +1,63 @@
+package handler
+
+import (
+	"github.com/gin-gonic/gin"
+	"einfra/api/internal/infrastructure/docker/usecase"
+)
+
+// DockerHandlers groups all Docker-related handlers
+type DockerHandlers struct {
+	Swarm     *SwarmHandler
+	WebSocket *WebSocketHandler
+}
+
+// NewDockerHandlers creates a new Docker handlers instance
+func NewDockerHandlers(
+	swarmUC usecase.DockerSwarmUsecase,
+	composeUC usecase.DockerComposeUsecase,
+	registryUC usecase.DockerRegistryUsecase,
+	templateUC usecase.DockerTemplateUsecase,
+	fileBrowserUC usecase.DockerFileBrowserUsecase,
+) *DockerHandlers {
+	return &DockerHandlers{
+		Swarm:     NewSwarmHandler(swarmUC),
+		WebSocket: NewWebSocketHandler(swarmUC, composeUC, fileBrowserUC),
+	}
+}
+
+// RegisterDockerRoutes registers all Docker-related routes
+func RegisterDockerRoutes(r *gin.RouterGroup, h *DockerHandlers) {
+	docker := r.Group("/docker")
+	{
+		// Swarm routes
+		swarm := docker.Group("/servers/:server_id/swarm")
+		{
+			swarm.POST("/init", h.Swarm.InitSwarm)
+			swarm.POST("/join", h.Swarm.JoinSwarm)
+			swarm.POST("/leave", h.Swarm.LeaveSwarm)
+			swarm.GET("", h.Swarm.InspectSwarm)
+
+			// Service routes
+			swarm.POST("/services", h.Swarm.CreateService)
+			swarm.GET("/services", h.Swarm.ListServices)
+			swarm.POST("/services/:service_id/scale", h.Swarm.ScaleService)
+
+			// Node routes
+			swarm.GET("/nodes", h.Swarm.ListNodes)
+			swarm.POST("/nodes/:node_id/promote", h.Swarm.PromoteNode)
+			swarm.POST("/nodes/:node_id/demote", h.Swarm.DemoteNode)
+
+			// Secret routes
+			swarm.POST("/secrets", h.Swarm.CreateSecret)
+			swarm.GET("/secrets", h.Swarm.ListSecrets)
+		}
+
+		// WebSocket routes
+		ws := docker.Group("/ws/servers/:server_id")
+		{
+			ws.GET("/services/:service_id/logs", h.WebSocket.StreamServiceLogs)
+			ws.GET("/stacks/:stack_name/logs", h.WebSocket.StreamStackLogs)
+			ws.GET("/containers/:container_id/exec", h.WebSocket.ContainerExecWebSocket)
+		}
+	}
+}

@@ -1,0 +1,41 @@
+package handler
+
+import (
+	"github.com/gin-gonic/gin"
+	"einfra/api/internal/core/document/usecase"
+)
+
+// DocumentHandlers groups all Document-related handlers
+type DocumentHandlers struct {
+	Document *DocumentHandler
+}
+
+// NewDocumentHandlers creates a new Document handlers instance
+func NewDocumentHandlers(documentUC usecase.DocumentUsecase) *DocumentHandlers {
+	return &DocumentHandlers{
+		Document: NewDocumentHandler(documentUC),
+	}
+}
+
+// RegisterDocumentRoutes registers all Document-related routes
+func RegisterDocumentRoutes(r *gin.RouterGroup, h *DocumentHandlers) {
+	documents := r.Group("/documents")
+	{
+		// Document CRUD
+		documents.GET("", h.Document.ListDocuments)
+		documents.POST("", h.Document.UploadDocument)
+		documents.GET("/:document_id", h.Document.GetDocument)
+		documents.PUT("/:document_id", h.Document.UpdateDocument)
+		documents.DELETE("/:document_id", h.Document.DeleteDocument)
+
+		// Document operations
+		documents.GET("/:document_id/download", h.Document.DownloadDocument)
+		documents.GET("/:document_id/preview", h.Document.PreviewDocument)
+		documents.POST("/:document_id/share", h.Document.ShareDocument)
+
+		// Folder management
+		documents.POST("/folders", h.Document.CreateFolder)
+		documents.GET("/folders", h.Document.ListFolders)
+		documents.DELETE("/folders/:folder_id", h.Document.DeleteFolder)
+	}
+}

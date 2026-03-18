@@ -16,24 +16,34 @@ import {
   MinusSquare,
 } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
-import { mockServerService } from "../shared/mockServerService";
-import type { Service } from "../shared/mockServerService";
+import { useParams } from "react-router-dom";
+import { useServerServices, useServiceAction } from "../../../api/useServerHooks";
 import { ServiceLogDrawer } from "../monitoring/ServiceLogDrawer";
 import { ServiceDetailsModal } from "./ServiceDetailsModal";
 import { AddServiceWizard } from "./AddServiceWizard";
-// Removed Popover import
 import { cn } from "@/lib/utils";
 import { Button } from "@/shared/ui/Button";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/shared/ui/Table";
 
 export default function ServerServices() {
-  const [services, setServices] = useState<Service[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { serverId } = useParams<{ serverId: string }>();
+
+  // Real Hooks
+  const {
+    data: servicesData,
+    isLoading,
+    refetch,
+  } = useServerServices(serverId || "");
+
+  const { mutateAsync: serviceAction } = useServiceAction(serverId || "");
+
+  const services = servicesData || [];
+
   const [selectedServiceLogs, setSelectedServiceLogs] = useState<string | null>(
     null,
   );
   const [selectedServiceDetails, setSelectedServiceDetails] =
-    useState<Service | null>(null);
+    useState<any | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showWizard, setShowWizard] = useState(false);
 
@@ -53,23 +63,66 @@ export default function ServerServices() {
     isOpen: boolean;
   } | null>(null);
 
-  const fetchServices = async () => {
+  const handleAction = async (
+    action: "start" | "stop" | "restart" | "reload" | "enable" | "disable",
+    serviceName: string,
+  ) => {
+    setActionLoading(`${serviceName}-${action}`);
+    setActiveMenu(null);
     try {
-      const data = await mockServerService.getServices();
-      setServices(data);
+      await serviceAction({ name: serviceName, action });
     } catch (error) {
-      console.error("Failed to fetch services", error);
+      console.error(`Failed to ${action} service ${serviceName}`, error);
     } finally {
-      setIsLoading(false);
+      setActionLoading(null);
     }
   };
 
-  useEffect(() => {
-    fetchServices();
-    // Poll for status updates
-    const interval = setInterval(fetchServices, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  const confirmAndExecute = (type: "stop" | "restart", service: string) => {
+    setActiveMenu(null);
+    if (["mysql", "ssh", "postgresql", "docker", "nginx"].includes(service)) {
+      setConfirmAction({ type, service, isOpen: true });
+    } else {
+      executeAction(type, service);
+    }
+  };
+
+  const executeAction = (type: "stop" | "restart", serviceName: string) => {
+    handleAction(type, serviceName);
+    setConfirmAction(null);
+  };
+
+  const executeBulkAction = async (
+    actionType: "stop" | "restart" | "reload",
+  ) => {
+    const selectedList = Array.from(selectedServices);
+    setConfirmAction(null);
+    const promises = selectedList.map((name) =>
+      handleAction(actionType as any, name),
+    );
+    await Promise.all(promises);
+    setSelectedServices(new Set());
+  };
+
+  const handleBulkAction = async (
+    actionType: "stop" | "restart" | "reload",
+  ) => {
+    const selectedList = Array.from(selectedServices);
+    const hasDangerous = selectedList.some((s) =>
+      ["mysql", "ssh", "postgresql", "docker"].includes(s),
+    );
+
+    if (hasDangerous && (actionType === "stop" || actionType === "restart")) {
+      setConfirmAction({
+        type: `bulk-${actionType}` as any,
+        service: "bulk",
+        isOpen: true,
+      });
+      return;
+    }
+
+    await executeBulkAction(actionType);
+  };
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -107,104 +160,6 @@ export default function ServerServices() {
     services.length > 0 && selectedServices.size === services.length;
   const isIndeterminate =
     selectedServices.size > 0 && selectedServices.size < services.length;
-
-  const handleAction = async (
-    action: () => Promise<void>,
-    serviceName: string,
-    actionType: string,
-  ) => {
-    setActionLoading(`${serviceName}-${actionType}`);
-    setActiveMenu(null); // Close menu on action
-    try {
-      await action();
-      // Optimistic update or refetch
-      await fetchServices();
-    } catch (error) {
-      console.error(`Failed to ${actionType} service ${serviceName}`, error);
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const confirmAndExecute = (type: "stop" | "restart", service: string) => {
-    setActiveMenu(null);
-    if (["mysql", "ssh", "postgresql", "docker", "nginx"].includes(service)) {
-      setConfirmAction({ type, service, isOpen: true });
-    } else {
-      executeAction(type, service);
-    }
-  };
-
-  const executeAction = (type: "stop" | "restart", serviceName: string) => {
-    if (type === "stop") {
-      handleAction(
-        () => mockServerService.stopService(serviceName),
-        serviceName,
-        "stop",
-      );
-    } else {
-      handleAction(
-        () => mockServerService.restartService(serviceName),
-        serviceName,
-        "restart",
-      );
-    }
-    setConfirmAction(null);
-  };
-
-  // Bulk Actions
-  const handleBulkAction = async (
-    actionType: "stop" | "restart" | "reload",
-  ) => {
-    // For bulk actions, we might want to confirm if any "dangerous" services are selected
-    const selectedList = Array.from(selectedServices);
-    const hasDangerous = selectedList.some((s) =>
-      ["mysql", "ssh", "postgresql", "docker"].includes(s),
-    );
-
-    if (hasDangerous && (actionType === "stop" || actionType === "restart")) {
-      setConfirmAction({
-        type: `bulk-${actionType}` as any,
-        service: "bulk",
-        isOpen: true,
-      });
-      return;
-    }
-
-    await executeBulkAction(actionType);
-  };
-
-  const executeBulkAction = async (
-    actionType: "stop" | "restart" | "reload",
-  ) => {
-    const selectedList = Array.from(selectedServices);
-    setConfirmAction(null);
-    // Clear selection after action start? Maybe keep it. Let's keep it for now.
-
-    const promises = selectedList.map((name) => {
-      if (actionType === "stop")
-        return handleAction(
-          () => mockServerService.stopService(name),
-          name,
-          "stop",
-        );
-      if (actionType === "restart")
-        return handleAction(
-          () => mockServerService.restartService(name),
-          name,
-          "restart",
-        );
-      if (actionType === "reload")
-        return handleAction(
-          () => mockServerService.reloadService(name),
-          name,
-          "reload",
-        );
-    });
-
-    await Promise.all(promises);
-    setSelectedServices(new Set()); // Clear selection after completion
-  };
 
   return (
     <div className="space-y-6 relative pb-20 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -257,291 +212,254 @@ export default function ServerServices() {
             </TableHeader>
             <TableBody>
               {isLoading && services.length === 0
-                ? // Skeleton Loader
-                [...Array(5)].map((_, i) => (
-                  <TableRow key={i} className="animate-pulse">
-                    <TableCell>
-                      <div className="h-4 w-4 bg-zinc-200 dark:bg-zinc-800 rounded mx-auto"></div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-4 bg-zinc-200 dark:bg-zinc-800 rounded w-24"></div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-5 bg-zinc-200 dark:bg-zinc-800 rounded-full w-20"></div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-4 bg-zinc-200 dark:bg-zinc-800 rounded w-16"></div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-48"></div>
-                    </TableCell>
-                    <TableCell className="flex justify-end gap-2">
-                      <div className="h-7 w-20 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
-                    </TableCell>
-                  </TableRow>
-                ))
+                ? [
+                    // Skeleton Loader
+                    ...Array(5),
+                  ].map((_, i) => (
+                    <TableRow key={i} className="animate-pulse">
+                      <TableCell>
+                        <div className="h-4 w-4 bg-zinc-200 dark:bg-zinc-800 rounded mx-auto"></div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-4 bg-zinc-200 dark:bg-zinc-800 rounded w-24"></div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-5 bg-zinc-200 dark:bg-zinc-800 rounded-full w-20"></div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-4 bg-zinc-200 dark:bg-zinc-800 rounded w-16"></div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-48"></div>
+                      </TableCell>
+                      <TableCell className="flex justify-end gap-2">
+                        <div className="h-7 w-20 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
+                      </TableCell>
+                    </TableRow>
+                  ))
                 : services.map((service) => (
-                  <TableRow
-                    key={service.name}
-                    onClick={(e) => {
-                      if ((e.target as HTMLElement).closest("button")) return;
-                      toggleSelect(service.name);
-                    }}
-                    className={cn(
-                      "group transition-colors cursor-pointer",
-                      selectedServices.has(service.name)
-                        ? "bg-purple-50/50 dark:bg-purple-900/10 hover:bg-purple-50 dark:hover:bg-purple-900/20"
-                        : "hover:bg-zinc-50 dark:hover:bg-zinc-800/30",
-                    )}
-                  >
-                    <TableCell className="text-center">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleSelect(service.name);
-                        }}
-                        className={cn(
-                          "flex items-center justify-center transition-colors",
-                          selectedServices.has(service.name)
-                            ? "text-purple-600 dark:text-purple-400"
-                            : "text-zinc-300 dark:text-zinc-600 group-hover:text-zinc-400",
-                        )}
-                      >
-                        {selectedServices.has(service.name) ? (
-                          <CheckSquare size={16} />
-                        ) : (
-                          <Square size={16} />
-                        )}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                        {service.name}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold border shadow-sm",
-                          service.status === "active"
-                            ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-200/50 dark:border-emerald-800/50"
-                            : service.status === "inactive"
-                              ? "bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200/50 dark:border-zinc-700/50"
-                              : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-red-200/50 dark:border-red-800/50",
-                        )}
-                      >
+                    <TableRow
+                      key={service.name}
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest("button")) return;
+                        toggleSelect(service.name);
+                      }}
+                      className={cn(
+                        "group transition-colors cursor-pointer",
+                        selectedServices.has(service.name)
+                          ? "bg-purple-50/50 dark:bg-purple-900/10 hover:bg-purple-50 dark:hover:bg-purple-900/20"
+                          : "hover:bg-zinc-50 dark:hover:bg-zinc-800/30",
+                      )}
+                    >
+                      <TableCell className="text-center">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSelect(service.name);
+                          }}
+                          className={cn(
+                            "flex items-center justify-center transition-colors",
+                            selectedServices.has(service.name)
+                              ? "text-purple-600 dark:text-purple-400"
+                              : "text-zinc-300 dark:text-zinc-600 group-hover:text-zinc-400",
+                          )}
+                        >
+                          {selectedServices.has(service.name) ? (
+                            <CheckSquare size={16} />
+                          ) : (
+                            <Square size={16} />
+                          )}
+                        </button>
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                          {service.name}
+                        </div>
+                      </TableCell>
+                      <TableCell>
                         <span
                           className={cn(
-                            "w-1.5 h-1.5 rounded-full",
+                            "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold border shadow-sm",
                             service.status === "active"
-                              ? "bg-emerald-500 animate-pulse"
+                              ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-200/50 dark:border-emerald-800/50"
                               : service.status === "inactive"
-                                ? "bg-zinc-400"
-                                : "bg-red-500",
+                                ? "bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200/50 dark:border-zinc-700/50"
+                                : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-red-200/50 dark:border-red-800/50",
                           )}
-                        ></span>
-                        {service.status === "active"
-                          ? "Active"
-                          : service.status === "inactive"
-                            ? "Inactive"
-                            : "Failed"}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {service.bootStatus === "enabled" ? (
-                          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-900/10 px-2.5 py-1 rounded border border-emerald-100/50 dark:border-emerald-900/30">
-                            <CheckCircle2 size={12} />
-                            Enabled
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800/50 px-2.5 py-1 rounded border border-zinc-200/50 dark:border-zinc-700/50">
-                            <XCircle size={12} />
-                            Disabled
-                          </div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell
-                      className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400 max-w-[250px] truncate"
-                      title={service.description}
-                    >
-                      {service.description}
-                    </TableCell>
-                    <TableCell className="text-right relative">
-                      <div className="flex items-center justify-end gap-1 opacity-100">
-                        {/* Primary Actions */}
-                        {service.status === "active" ? (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              confirmAndExecute("stop", service.name);
-                            }}
-                            disabled={!!actionLoading}
-                            className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                            title="Stop Service"
-                          >
-                            {actionLoading === `${service.name}-stop` ? (
-                              <RefreshCcw
-                                size={14}
-                                className="animate-spin"
-                              />
-                            ) : (
-                              <Square size={14} fill="currentColor" />
-                            )}
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAction(
-                                () =>
-                                  mockServerService.startService(
-                                    service.name,
-                                  ),
-                                service.name,
-                                "start",
-                              );
-                            }}
-                            disabled={!!actionLoading}
-                            className="text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
-                            title="Start Service"
-                          >
-                            {actionLoading === `${service.name}-start` ? (
-                              <RefreshCcw
-                                size={14}
-                                className="animate-spin"
-                              />
-                            ) : (
-                              <Play size={14} fill="currentColor" />
-                            )}
-                          </Button>
-                        )}
-
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            confirmAndExecute("restart", service.name);
-                          }}
-                          disabled={!!actionLoading}
-                          className="text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
-                          title="Restart Service"
                         >
-                          {actionLoading === `${service.name}-restart` ? (
-                            <RefreshCcw size={14} className="animate-spin" />
-                          ) : (
-                            <RotateCw size={14} />
-                          )}
-                        </Button>
-
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedServiceLogs(service.name);
-                          }}
-                          className="text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-100 dark:hover:bg-zinc-800"
-                          title="View Logs"
-                        >
-                          <FileText size={14} />
-                        </Button>
-
-                        {/* Secondary Actions Dropdown */}
-                        <div className="relative">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveMenu(activeMenu === service.name ? null : service.name);
-                            }}
+                          <span
                             className={cn(
-                              "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-100 dark:hover:bg-zinc-800",
-                              activeMenu === service.name ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100" : ""
+                              "w-1.5 h-1.5 rounded-full",
+                              service.status === "active"
+                                ? "bg-emerald-500 animate-pulse"
+                                : service.status === "inactive"
+                                  ? "bg-zinc-400"
+                                  : "bg-red-500",
                             )}
-                          >
-                            <MoreVertical size={14} />
-                          </Button>
-
-                          {activeMenu === service.name && (
-                            <div
-                              ref={menuRef}
-                              className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-[#1A1A1A] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl shadow-xl z-50 animate-in fade-in zoom-in-95 duration-100 p-1.5"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <button
-                                onClick={() => {
-                                  setSelectedServiceDetails(service);
-                                  setActiveMenu(null);
-                                }}
-                                className="flex w-full items-center gap-2 px-2.5 py-2 text-[13px] font-medium rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors"
-                              >
-                                <Info size={14} className="text-zinc-400" /> View Details
-                              </button>
-                              <div className="my-1 h-px bg-zinc-100 dark:bg-zinc-800/60" />
-                              <button
-                                onClick={() =>
-                                  handleAction(
-                                    () =>
-                                      mockServerService.reloadService(
-                                        service.name,
-                                      ),
-                                    service.name,
-                                    "reload",
-                                  )
-                                }
-                                className="flex w-full items-center gap-2 px-2.5 py-2 text-[13px] font-medium cursor-pointer rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors"
-                              >
-                                <RefreshCcw size={14} className="text-zinc-400" /> Reload
-                              </button>
-
-                              {service.bootStatus === "disabled" ? (
-                                <button
-                                  onClick={() =>
-                                    handleAction(
-                                      () =>
-                                        mockServerService.enableService(
-                                          service.name,
-                                        ),
-                                      service.name,
-                                      "enable",
-                                    )
-                                  }
-                                  className="flex w-full items-center gap-2 px-2.5 py-2 text-[13px] cursor-pointer font-medium rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors"
-                                >
-                                  <Power size={14} className="text-zinc-400" /> Enable on boot
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() =>
-                                    handleAction(
-                                      () =>
-                                        mockServerService.disableService(
-                                          service.name,
-                                        ),
-                                      service.name,
-                                      "disable",
-                                    )
-                                  }
-                                  className="flex w-full items-center gap-2 px-2.5 py-2 text-[13px] cursor-pointer font-medium rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors"
-                                >
-                                  <Power size={14} className="text-zinc-400" /> Disable on boot
-                                </button>
-                              )}
+                          ></span>
+                          {service.status === "active"
+                            ? "Active"
+                            : service.status === "inactive"
+                              ? "Inactive"
+                              : "Failed"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {service.boot_status === "enabled" ? (
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-900/10 px-2.5 py-1 rounded border border-emerald-100/50 dark:border-emerald-900/30">
+                              <CheckCircle2 size={12} />
+                              Enabled
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800/50 px-2.5 py-1 rounded border border-zinc-200/50 dark:border-zinc-700/50">
+                              <XCircle size={12} />
+                              Disabled
                             </div>
                           )}
                         </div>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell
+                        className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400 max-w-[250px] truncate"
+                        title={service.description}
+                      >
+                        {service.description}
+                      </TableCell>
+                      <TableCell className="text-right relative">
+                        <div className="flex items-center justify-end gap-1 opacity-100">
+                          {/* Primary Actions */}
+                          {service.status === "active" ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                confirmAndExecute("stop", service.name);
+                              }}
+                              disabled={!!actionLoading}
+                              className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                              title="Stop Service"
+                            >
+                              {actionLoading === `${service.name}-stop` ? (
+                                <RefreshCcw size={14} className="animate-spin" />
+                              ) : (
+                                <Square size={14} fill="currentColor" />
+                              )}
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAction("start", service.name);
+                              }}
+                              disabled={!!actionLoading}
+                              className="text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+                              title="Start Service"
+                            >
+                              {actionLoading === `${service.name}-start` ? (
+                                <RefreshCcw size={14} className="animate-spin" />
+                              ) : (
+                                <Play size={14} fill="currentColor" />
+                              )}
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              confirmAndExecute("restart", service.name);
+                            }}
+                            disabled={!!actionLoading}
+                            className="text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                            title="Restart Service"
+                          >
+                            {actionLoading === `${service.name}-restart` ? (
+                              <RefreshCcw size={14} className="animate-spin" />
+                            ) : (
+                              <RotateCw size={14} />
+                            )}
+                          </Button>
+
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedServiceLogs(service.name);
+                            }}
+                            className="text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-100 dark:hover:bg-zinc-800"
+                            title="View Logs"
+                          >
+                            <FileText size={14} />
+                          </Button>
+
+                          {/* Secondary Actions Dropdown */}
+                          <div className="relative">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMenu(activeMenu === service.name ? null : service.name);
+                              }}
+                              className={cn(
+                                "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-100 dark:hover:bg-zinc-800",
+                                activeMenu === service.name
+                                  ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                                  : "",
+                              )}
+                            >
+                              <MoreVertical size={14} />
+                            </Button>
+
+                            {activeMenu === service.name && (
+                              <div
+                                ref={menuRef}
+                                className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-[#1A1A1A] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl shadow-xl z-50 animate-in fade-in zoom-in-95 duration-100 p-1.5"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <button
+                                  onClick={() => {
+                                    setSelectedServiceDetails(service);
+                                    setActiveMenu(null);
+                                  }}
+                                  className="flex w-full items-center gap-2 px-2.5 py-2 text-[13px] font-medium rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors"
+                                >
+                                  <Info size={14} className="text-zinc-400" /> View Details
+                                </button>
+                                <div className="my-1 h-px bg-zinc-100 dark:bg-zinc-800/60" />
+                                <button
+                                  onClick={() => handleAction("reload", service.name)}
+                                  className="flex w-full items-center gap-2 px-2.5 py-2 text-[13px] font-medium cursor-pointer rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors"
+                                >
+                                  <RefreshCcw size={14} className="text-zinc-400" /> Reload
+                                </button>
+
+                                {service.boot_status === "disabled" ? (
+                                  <button
+                                    onClick={() => handleAction("enable", service.name)}
+                                    className="flex w-full items-center gap-2 px-2.5 py-2 text-[13px] cursor-pointer font-medium rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors"
+                                  >
+                                    <Power size={14} className="text-zinc-400" /> Enable on boot
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleAction("disable", service.name)}
+                                    className="flex w-full items-center gap-2 px-2.5 py-2 text-[13px] cursor-pointer font-medium rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors"
+                                  >
+                                    <Power size={14} className="text-zinc-400" /> Disable on boot
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
             </TableBody>
           </Table>
         </div>
@@ -617,10 +535,7 @@ export default function ServerServices() {
       )}
 
       {/* Add Service Wizard */}
-      <AddServiceWizard
-        isOpen={showWizard}
-        onClose={() => setShowWizard(false)}
-      />
+      <AddServiceWizard isOpen={showWizard} onClose={() => setShowWizard(false)} />
 
       {/* Confirmation Modal */}
       {confirmAction && (
@@ -630,7 +545,9 @@ export default function ServerServices() {
               <div className="p-2.5 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-xl border border-red-100 dark:border-red-900/50">
                 <ShieldAlert size={20} />
               </div>
-              <h3 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-zinc-50">Confirm Action</h3>
+              <h3 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+                Confirm Action
+              </h3>
             </div>
             <p className="text-[13px] text-zinc-600 dark:text-zinc-400 mb-6 leading-relaxed">
               {confirmAction.type.startsWith("bulk") ? (
@@ -641,11 +558,14 @@ export default function ServerServices() {
                   </span>{" "}
                   {selectedServices.size} services?
                   <span className="block mt-3 text-red-500 font-semibold flex items-start gap-1.5 bg-red-50 dark:bg-red-900/10 p-2 rounded-lg border border-red-100 dark:border-red-900/20">
-                    <AlertTriangle size={16} className="shrink-0 mt-0.5" /> 
-                    <span>Warning: This includes critical services like{" "}
-                    {Array.from(selectedServices).find((s) =>
-                      ["mysql", "ssh", "postgresql", "docker"].includes(s),
-                    )}.</span>
+                    <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                    <span>
+                      Warning: This includes critical services like{" "}
+                      {Array.from(selectedServices).find((s) =>
+                        ["mysql", "ssh", "postgresql", "docker"].includes(s),
+                      )}
+                      .
+                    </span>
                   </span>
                 </>
               ) : (
@@ -669,10 +589,7 @@ export default function ServerServices() {
               )}
             </p>
             <div className="flex justify-end gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => setConfirmAction(null)}
-              >
+              <Button variant="ghost" onClick={() => setConfirmAction(null)}>
                 Cancel
               </Button>
               <Button
@@ -680,14 +597,9 @@ export default function ServerServices() {
                 className="bg-red-600 hover:bg-red-700 text-white shadow-sm shadow-red-500/20"
                 onClick={() => {
                   if (confirmAction.type.startsWith("bulk")) {
-                    executeBulkAction(
-                      confirmAction.type.replace("bulk-", "") as any,
-                    );
+                    executeBulkAction(confirmAction.type.replace("bulk-", "") as any);
                   } else {
-                    executeAction(
-                      confirmAction.type as any,
-                      confirmAction.service,
-                    );
+                    executeAction(confirmAction.type as any, confirmAction.service);
                   }
                 }}
               >

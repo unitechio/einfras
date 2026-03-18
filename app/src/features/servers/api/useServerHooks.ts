@@ -348,6 +348,18 @@ export const useAlerts = (serverId: string) =>
 // Add Server (POST /api/v1/servers)
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const useServerHealthCheck = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (serverId: string) => serversApi.healthCheck(serverId),
+    onSuccess: (_, serverId) => {
+      qc.invalidateQueries({ queryKey: serverKeys.detail(serverId) });
+      qc.invalidateQueries({ queryKey: ["servers", "status"] });
+      qc.invalidateQueries({ queryKey: ["servers", "list"] });
+    },
+  });
+};
+
 export const useAddServer = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -365,6 +377,8 @@ export const useAddServer = () => {
         provider: newServer.provider,
         ssh_port: newServer.ssh_port,
         ssh_user: newServer.ssh_user,
+        ssh_password: newServer.ssh_password,
+        ssh_key_path: newServer.ssh_key_path,
         tunnel_enabled: newServer.tunnel_enabled,
         tunnel_host: (newServer as any).tunnel_host,
         tunnel_port: (newServer as any).tunnel_port,

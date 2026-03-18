@@ -26,16 +26,16 @@ services:
       - MINIO_USE_SSL=false
 
   db:
-    image: mysql:8.0
+    image: postgres:15-alpine
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: mydatabase
-      MYSQL_USER: user
-      MYSQL_PASSWORD: password
+      POSTGRES_USER: einfra 
+      POSTGRES_PASSWORD: einfra123
+      POSTGRES_DB: einfra
     ports:
-      - "3306:3306"
+      - "5432:5432"
     volumes:
-      - db_data:/var/lib/mysql
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
 
   redis:
     image: redis:6.2-alpine

@@ -31,7 +31,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { FirewallRule, FirewallPolicy } from "@/types/firewall.types";
-import { mockFirewallService } from "../shared/mockFirewallService";
+import { useFirewallRules, useDeleteFirewallRule, useUpdateFirewallRule, useApplyFirewall } from "../../../api/useServerHooks";
 
 const INITIAL_POLICY: FirewallPolicy = {
   defaultInbound: "DENY",
@@ -50,6 +50,7 @@ function SortableRuleRow({
   onDelete: (id: string) => void;
   onToggle: (id: string) => void;
 }) {
+  const { serverId } = useParams();
   const {
     attributes,
     listeners,
@@ -155,7 +156,7 @@ function SortableRuleRow({
             variant="ghost"
             size="icon"
             className="text-zinc-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:text-blue-400 dark:hover:bg-blue-900/20"
-            onClick={() => window.location.href = `/servers/${useParams().serverId}/firewall/${rule.id}/edit`}
+            onClick={() => window.location.href = `/servers/${serverId}/firewall/${rule.id}/edit`}
           >
             <Shield size={14} />
           </Button>
@@ -175,11 +176,17 @@ function SortableRuleRow({
 
 export default function ServerFirewall() {
   const { serverId } = useParams<{ serverId: string }>();
+  
+  // Real Hooks
+  const { data: rulesData, isLoading: loading } = useFirewallRules(serverId || "");
+  const { mutateAsync: deleteRule } = useDeleteFirewallRule(serverId || "");
+  const { mutateAsync: updateRule } = useUpdateFirewallRule(serverId || "");
+  const { mutateAsync: applyFirewall } = useApplyFirewall(serverId || "");
+
   const [rules, setRules] = useState<FirewallRule[]>([]);
   const [originalRules, setOriginalRules] = useState<FirewallRule[]>([]);
   const [policy, setPolicy] = useState<FirewallPolicy>(INITIAL_POLICY);
   const [hasChanges, setHasChanges] = useState(false);
-  const [loading, setLoading] = useState(true);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -189,16 +196,11 @@ export default function ServerFirewall() {
   );
 
   useEffect(() => {
-    loadRules();
-  }, []);
-
-  const loadRules = async () => {
-    setLoading(true);
-    const data = await mockFirewallService.getRules();
-    setRules(data);
-    setOriginalRules(JSON.parse(JSON.stringify(data)));
-    setLoading(false);
-  };
+    if (rulesData) {
+      setRules(rulesData);
+      setOriginalRules(JSON.parse(JSON.stringify(rulesData)));
+    }
+  }, [rulesData]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -223,24 +225,22 @@ export default function ServerFirewall() {
 
   const handleDelete = async (id: string) => {
     if (confirm("Are you sure you want to delete this rule?")) {
-      await mockFirewallService.deleteRule(id);
-      loadRules(); // Reload
+      try {
+        await deleteRule(id);
+      } catch (error) {
+        console.error("Failed to delete rule", error);
+      }
     }
   };
 
   const handleToggle = async (id: string) => {
-    // Optimistic
-    const newRules = rules.map((r) =>
-      r.id === id ? { ...r, enabled: !r.enabled } : r,
-    );
-    setRules(newRules);
-
-    const rule = newRules.find((r) => r.id === id);
+    const rule = rules.find((r) => r.id === id);
     if (rule) {
-      await mockFirewallService.saveRule(rule);
-      setOriginalRules((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, enabled: rule.enabled } : r)),
-      );
+      try {
+        await updateRule({ ...rule, enabled: !rule.enabled });
+      } catch (error) {
+        console.error("Failed to toggle rule", error);
+      }
     }
   };
 
@@ -255,7 +255,7 @@ export default function ServerFirewall() {
     val: "ALLOW" | "DENY",
   ) => {
     setPolicy((prev) => ({ ...prev, [dir]: val }));
-    setHasChanges(true); // Assuming policy change also needs apply
+    setHasChanges(true);
   };
 
   return (
@@ -444,9 +444,13 @@ export default function ServerFirewall() {
               variant="primary"
               size="sm"
               onClick={async () => {
-                await mockFirewallService.updateRulesOrder(rules);
-                setOriginalRules(JSON.parse(JSON.stringify(rules)));
-                setHasChanges(false);
+                try {
+                    await applyFirewall(rules);
+                    setOriginalRules(JSON.parse(JSON.stringify(rules)));
+                    setHasChanges(false);
+                } catch (error) {
+                    console.error("Failed to apply firewall", error);
+                }
               }}
               className="bg-amber-500 text-amber-950 hover:bg-amber-400"
             >

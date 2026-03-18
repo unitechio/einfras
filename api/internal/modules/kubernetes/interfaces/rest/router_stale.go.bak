@@ -1,0 +1,70 @@
+package handler
+
+import (
+	"github.com/gin-gonic/gin"
+	"einfra/api/internal/infrastructure/kubernetes/usecase"
+)
+
+// K8sHandlers groups all Kubernetes-related handlers
+type K8sHandlers struct {
+	Kubernetes *KubernetesHandler
+	Kubeconfig *KubeconfigHandler
+}
+
+// NewK8sHandlers creates a new Kubernetes handlers instance
+func NewK8sHandlers(
+	k8sUC usecase.KubernetesUsecase,
+	backupUC usecase.K8sBackupUsecase,
+) *K8sHandlers {
+	return &K8sHandlers{
+		Kubernetes: NewKubernetesHandler(k8sUC, backupUC),
+		Kubeconfig: NewKubeconfigHandler(k8sUC),
+	}
+}
+
+// RegisterK8sRoutes registers all Kubernetes-related routes
+func RegisterK8sRoutes(r *gin.RouterGroup, h *K8sHandlers) {
+	k8s := r.Group("/kubernetes")
+	{
+		// Cluster routes
+		k8s.GET("/clusters", h.Kubernetes.ListClusters)
+		k8s.POST("/clusters", h.Kubernetes.CreateCluster)
+		k8s.GET("/clusters/:cluster_id", h.Kubernetes.GetCluster)
+		k8s.DELETE("/clusters/:cluster_id", h.Kubernetes.DeleteCluster)
+
+		// Pod routes
+		pods := k8s.Group("/clusters/:cluster_id/namespaces/:namespace/pods")
+		{
+			pods.GET("", h.Kubernetes.ListPods)
+			pods.POST("", h.Kubernetes.CreatePod)
+			pods.GET("/:pod_name", h.Kubernetes.GetPod)
+			pods.DELETE("/:pod_name", h.Kubernetes.DeletePod)
+			pods.GET("/:pod_name/logs", h.Kubernetes.GetPodLogs)
+		}
+
+		// Deployment routes
+		deployments := k8s.Group("/clusters/:cluster_id/namespaces/:namespace/deployments")
+		{
+			deployments.GET("", h.Kubernetes.ListDeployments)
+			deployments.POST("", h.Kubernetes.CreateDeployment)
+			deployments.GET("/:deployment_name", h.Kubernetes.GetDeployment)
+			deployments.PUT("/:deployment_name", h.Kubernetes.UpdateDeployment)
+			deployments.DELETE("/:deployment_name", h.Kubernetes.DeleteDeployment)
+			deployments.PUT("/:deployment_name/scale", h.Kubernetes.ScaleDeployment)
+		}
+
+		// Service routes
+		services := k8s.Group("/clusters/:cluster_id/namespaces/:namespace/services")
+		{
+			services.GET("", h.Kubernetes.ListServices)
+			services.POST("", h.Kubernetes.CreateService)
+			services.GET("/:service_name", h.Kubernetes.GetService)
+			services.DELETE("/:service_name", h.Kubernetes.DeleteService)
+		}
+
+		// Kubeconfig routes
+		k8s.POST("/kubeconfig", h.Kubeconfig.UploadKubeconfig)
+		k8s.GET("/kubeconfig/:cluster_id", h.Kubeconfig.GetKubeconfig)
+		k8s.DELETE("/kubeconfig/:cluster_id", h.Kubeconfig.DeleteKubeconfig)
+	}
+}

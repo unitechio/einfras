@@ -1,0 +1,71 @@
+package handler
+
+import (
+	"github.com/gin-gonic/gin"
+	"einfra/api/internal/infrastructure/server/usecase"
+)
+
+// ServerHandlers groups all Server-related handlers
+type ServerHandlers struct {
+	Server *ServerHandler
+	Backup *BackupHandler
+	Tunnel *TunnelHandler
+}
+
+// NewServerHandlers creates a new Server handlers instance
+func NewServerHandlers(
+	serverUC usecase.ServerUsecase,
+	backupUC usecase.ServerBackupUsecase,
+	cronjobUC usecase.ServerCronjobUsecase,
+	iptableUC usecase.ServerIptableUsecase,
+	networkUC usecase.ServerNetworkUsecase,
+	serviceUC usecase.ServerServiceUsecase,
+	alertUC usecase.AlertUsecase,
+) *ServerHandlers {
+	return &ServerHandlers{
+		Server: NewServerHandler(serverUC, cronjobUC, iptableUC, networkUC, serviceUC, alertUC),
+		Backup: NewBackupHandler(backupUC),
+		Tunnel: NewTunnelHandler(serverUC),
+	}
+}
+
+// RegisterServerRoutes registers all Server-related routes
+func RegisterServerRoutes(r *gin.RouterGroup, h *ServerHandlers) {
+	servers := r.Group("/servers")
+	{
+		// Server CRUD
+		servers.GET("", h.Server.ListServers)
+		servers.POST("", h.Server.CreateServer)
+		servers.GET("/:server_id", h.Server.GetServer)
+		servers.PUT("/:server_id", h.Server.UpdateServer)
+		servers.DELETE("/:server_id", h.Server.DeleteServer)
+
+		// Server metrics
+		servers.GET("/:server_id/metrics", h.Server.GetServerMetrics)
+		servers.GET("/:server_id/health", h.Server.HealthCheck)
+
+		// Server management
+		servers.POST("/:server_id/services", h.Server.ManageService)
+		servers.GET("/:server_id/services", h.Server.ListServices)
+		servers.POST("/:server_id/cronjobs", h.Server.ManageCronjob)
+		servers.GET("/:server_id/cronjobs", h.Server.ListCronjobs)
+		servers.POST("/:server_id/iptables", h.Server.ManageIptable)
+		servers.GET("/:server_id/iptables", h.Server.ListIptables)
+		servers.GET("/:server_id/network", h.Server.GetNetworkInfo)
+
+		// Backup routes
+		backups := servers.Group("/:server_id/backups")
+		{
+			backups.GET("", h.Backup.ListBackups)
+			backups.POST("", h.Backup.CreateBackup)
+			backups.GET("/:backup_id", h.Backup.GetBackup)
+			backups.POST("/:backup_id/restore", h.Backup.RestoreBackup)
+			backups.DELETE("/:backup_id", h.Backup.DeleteBackup)
+		}
+
+		// Tunnel routes
+		servers.POST("/:server_id/tunnel/start", h.Tunnel.StartTunnel)
+		servers.POST("/:server_id/tunnel/stop", h.Tunnel.StopTunnel)
+		servers.GET("/:server_id/tunnel/status", h.Tunnel.GetTunnelStatus)
+	}
+}

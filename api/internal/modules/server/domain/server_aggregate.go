@@ -1,0 +1,475 @@
+package domain
+
+import (
+	"context"
+	"time"
+)
+
+// ServerStatus defines string-based statuses matching the handler's usage and DB schema.
+type ServerStatus string
+
+const (
+	ServerStatusOnline      ServerStatus = "online"
+	ServerStatusOffline     ServerStatus = "offline"
+	ServerStatusMaintenance ServerStatus = "maintenance"
+	ServerStatusError        ServerStatus = "error"
+)
+
+type ServerOS string
+
+const (
+	ServerOSLinux      ServerOS = "linux"
+	ServerOSUbuntu     ServerOS = "ubuntu"
+	ServerOSDebian     ServerOS = "debian"
+	ServerOSCentOS     ServerOS = "centos"
+	ServerOSRockyLinux ServerOS = "rocky"
+	ServerOSAlmaLinux  ServerOS = "alma"
+	ServerOSFedora     ServerOS = "fedora"
+	ServerOSRHEL       ServerOS = "rhel"
+	ServerOSWindows    ServerOS = "windows"
+	ServerOSMacOS      ServerOS = "macos"
+)
+
+// Server is the Aggregate Root for the Server domain.
+type Server struct {
+	ID         string       `json:"id" db:"id"`
+	TenantID   string       `json:"tenant_id" db:"tenant_id"`
+	Name       string       `json:"name" db:"name"`
+	IPAddress  string       `json:"ip_address" db:"ip_address"`
+	OS         ServerOS     `json:"os" db:"os"`
+	Status     ServerStatus `json:"status" db:"status"`
+	Location   string       `json:"location" db:"location"`
+	Provider   string       `json:"provider" db:"provider"`
+	CPUCores   int          `json:"cpu_cores" db:"cpu_cores"`
+	MemoryGB   float64      `json:"memory_gb" db:"memory_gb"`
+	DiskGB     int          `json:"disk_gb" db:"disk_gb"`
+
+	// SSH Configuration
+	SSHPort     int    `json:"ssh_port" db:"ssh_port"`
+	SSHUser     string `json:"ssh_user" db:"ssh_user"`
+	SSHPassword string `json:"ssh_password" db:"ssh_password"` // Should be encrypted in DB
+	SSHKeyPath  string `json:"ssh_key_path" db:"ssh_key_path"`
+
+	Tags      []string  `json:"tags" db:"tags"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+}
+
+type ServerFilter struct {
+	Status   ServerStatus `json:"status"`
+	OS       ServerOS     `json:"os"`
+	Location string       `json:"location"`
+	Provider string       `json:"provider"`
+	Tags     []string     `json:"tags"`
+	Page     int          `json:"page"`
+	PageSize int          `json:"page_size"`
+}
+
+type ServerMetrics struct {
+	ServerID       string    `json:"server_id"`
+	CPUUsage       float64   `json:"cpu_usage"`
+	MemoryUsage    float64   `json:"memory_usage"`
+	DiskUsage      float64   `json:"disk_usage"`
+	NetworkInMbps  float64   `json:"network_in_mbps"`
+	NetworkOutMbps float64   `json:"network_out_mbps"`
+	Uptime         int64     `json:"uptime"`
+	LoadAverage    []float64 `json:"load_average"`
+}
+
+// --- Backup ---
+
+type BackupStatus string
+
+const (
+	BackupStatusPending    BackupStatus = "pending"
+	BackupStatusInProgress BackupStatus = "in_progress"
+	BackupStatusCompleted  BackupStatus = "completed"
+	BackupStatusFailed     BackupStatus = "failed"
+)
+
+type BackupType string
+
+const (
+	BackupTypeFull         BackupType = "full"
+	BackupTypeIncremental  BackupType = "incremental"
+	BackupTypeDifferential BackupType = "differential"
+)
+
+type ServerBackup struct {
+	ID           string       `json:"id" db:"id"`
+	ServerID     string       `json:"server_id" db:"server_id"`
+	Name         string       `json:"name" db:"name"`
+	Description  string       `json:"description" db:"description"`
+	Type         BackupType   `json:"type" db:"type"`
+	Status       BackupStatus `json:"status" db:"status"`
+	SizeBytes    int64        `json:"size_bytes" db:"size_bytes"`
+	SizeGB       float64      `json:"size_gb" db:"-"`
+	BackupPath   string       `json:"backup_path" db:"backup_path"`
+	Compressed   bool         `json:"compressed" db:"compressed"`
+	Encrypted    bool         `json:"encrypted" db:"encrypted"`
+	ErrorMessage string       `json:"error_message" db:"error_message"`
+	StartedAt    *time.Time   `json:"started_at" db:"started_at"`
+	CompletedAt  *time.Time   `json:"completed_at" db:"completed_at"`
+	ExpiresAt    *time.Time   `json:"expires_at" db:"expires_at"`
+	CreatedAt    time.Time    `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at" db:"updated_at"`
+}
+
+type BackupFilter struct {
+	ServerID string `json:"server_id"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"page_size"`
+}
+
+// --- Service ---
+
+type ServiceStatus string
+
+const (
+	ServiceStatusRunning ServiceStatus = "running"
+	ServiceStatusStopped ServiceStatus = "stopped"
+	ServiceStatusFailed  ServiceStatus = "failed"
+	ServiceStatusUnknown ServiceStatus = "unknown"
+)
+
+type ServiceAction string
+
+const (
+	ServiceActionStart   ServiceAction = "start"
+	ServiceActionStop    ServiceAction = "stop"
+	ServiceActionRestart ServiceAction = "restart"
+	ServiceActionReload  ServiceAction = "reload"
+	ServiceActionEnable  ServiceAction = "enable"
+	ServiceActionDisable ServiceAction = "disable"
+)
+
+type ServerService struct {
+	ID            string        `json:"id" db:"id"`
+	ServerID      string        `json:"server_id" db:"server_id"`
+	Name          string        `json:"name" db:"name"`
+	DisplayName   string        `json:"display_name" db:"display_name"`
+	Description   string        `json:"description" db:"description"`
+	Status        ServiceStatus `json:"status" db:"status"`
+	Enabled       bool          `json:"enabled" db:"enabled"`
+	PID           int           `json:"pid" db:"pid"`
+	Port          int           `json:"port" db:"port"`
+	ConfigPath    string        `json:"config_path" db:"config_path"`
+	LogPath       string        `json:"log_path" db:"log_path"`
+	LastCheckedAt time.Time     `json:"last_checked_at" db:"last_checked_at"`
+	CreatedAt     time.Time     `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at" db:"updated_at"`
+}
+
+type ServiceFilter struct {
+	ServerID string `json:"server_id"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"page_size"`
+}
+
+// --- Cronjob ---
+
+type CronjobStatus string
+
+const (
+	CronjobStatusActive   CronjobStatus = "active"
+	CronjobStatusInactive CronjobStatus = "inactive"
+	CronjobStatusFailed   CronjobStatus = "failed"
+)
+
+type ServerCronjob struct {
+	ID              string        `json:"id" db:"id"`
+	ServerID        string        `json:"server_id" db:"server_id"`
+	Name            string        `json:"name" db:"name"`
+	Description     string        `json:"description" db:"description"`
+	Status          CronjobStatus `json:"status" db:"status"`
+	CronExpression  string        `json:"cron_expression" db:"cron_expression"`
+	Command         string        `json:"command" db:"command"`
+	WorkingDir      string        `json:"working_dir" db:"working_dir"`
+	User            string        `json:"user" db:"user"`
+	LastRunAt       *time.Time    `json:"last_run_at" db:"last_run_at"`
+	NextRunAt       *time.Time    `json:"next_run_at" db:"next_run_at"`
+	LastExitCode    int           `json:"last_exit_code" db:"last_exit_code"`
+	LastOutput      string        `json:"last_output" db:"last_output"`
+	LastError       string        `json:"last_error" db:"last_error"`
+	ExecutionCount  int           `json:"execution_count" db:"execution_count"`
+	FailureCount    int           `json:"failure_count" db:"failure_count"`
+	NotifyOnFailure bool          `json:"notify_on_failure" db:"notify_on_failure"`
+	NotifyEmail     string        `json:"notify_email" db:"notify_email"`
+	CreatedAt       time.Time     `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time     `json:"updated_at" db:"updated_at"`
+}
+
+type CronjobExecution struct {
+	ID         string    `json:"id" db:"id"`
+	CronjobID  string    `json:"cronjob_id" db:"cronjob_id"`
+	StartedAt  time.Time `json:"started_at" db:"started_at"`
+	FinishedAt time.Time `json:"finished_at" db:"finished_at"`
+	ExitCode   int       `json:"exit_code" db:"exit_code"`
+	Output     string    `json:"output" db:"output"`
+	Error      string    `json:"error" db:"error"`
+	Duration   int       `json:"duration" db:"duration"` // seconds
+	Success    bool      `json:"success" db:"success"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+}
+
+type CronjobFilter struct {
+	ServerID string `json:"server_id"`
+	Status   string `json:"status"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"page_size"`
+}
+
+// --- IPTables ---
+
+type IPTableChain string
+
+const (
+	ChainInput   IPTableChain = "INPUT"
+	ChainForward IPTableChain = "FORWARD"
+	ChainOutput  IPTableChain = "OUTPUT"
+)
+
+type IPTableAction string
+
+const (
+	ActionAccept IPTableAction = "ACCEPT"
+	ActionDrop   IPTableAction = "DROP"
+	ActionReject IPTableAction = "REJECT"
+)
+
+type IPTableProtocol string
+
+const (
+	IPTableProtocolTCP IPTableProtocol = "tcp"
+	IPTableProtocolUDP IPTableProtocol = "udp"
+	IPTableProtocolAll IPTableProtocol = "all"
+)
+
+type ServerIPTable struct {
+	ID          string          `json:"id" db:"id"`
+	ServerID    string          `json:"server_id" db:"server_id"`
+	Name        string          `json:"name" db:"name"`
+	Description string          `json:"description" db:"description"`
+	Enabled     bool            `json:"enabled" db:"enabled"`
+	Chain       IPTableChain    `json:"chain" db:"chain"`
+	Action      IPTableAction   `json:"action" db:"action"`
+	Protocol    IPTableProtocol `json:"protocol" db:"protocol"`
+	SourceIP    string          `json:"source_ip" db:"source_ip"`
+	SourcePort  string          `json:"source_port" db:"source_port"`
+	DestIP      string          `json:"dest_ip" db:"dest_ip"`
+	DestPort    string          `json:"dest_port" db:"dest_port"`
+	Interface   string          `json:"interface" db:"interface"`
+	State       string          `json:"state" db:"state"`
+	Position    int             `json:"position" db:"position"`
+	RawRule     string          `json:"raw_rule" db:"raw_rule"`
+	Comment     string          `json:"comment" db:"comment"`
+	PacketCount int64           `json:"packet_count" db:"packet_count"`
+	ByteCount   int64           `json:"byte_count" db:"byte_count"`
+	LastApplied time.Time       `json:"last_applied" db:"last_applied"`
+}
+
+type IPTableBackup struct {
+	ID          string    `json:"id" db:"id"`
+	ServerID    string    `json:"server_id" db:"server_id"`
+	Name        string    `json:"name" db:"name"`
+	Description string    `json:"description" db:"description"`
+	Content     string    `json:"content" db:"content"`
+	RuleCount   int       `json:"rule_count" db:"rule_count"`
+	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+}
+
+// --- Network ---
+
+type NetworkInterface struct {
+	ID             string    `json:"id" db:"id"`
+	ServerID       string    `json:"server_id" db:"server_id"`
+	Name           string    `json:"name" db:"name"`
+	Type           string    `json:"type" db:"type"`
+	IPAddress      string    `json:"ip_address" db:"ip_address"`
+	MACAddress     string    `json:"mac_address" db:"mac_address"`
+	Netmask        string    `json:"netmask" db:"netmask"`
+	Gateway        string    `json:"gateway" db:"gateway"`
+	MTU            int       `json:"mtu" db:"mtu"`
+	Speed          int       `json:"speed" db:"speed"`
+	IsUp           bool      `json:"is_up" db:"is_up"`
+	BytesReceived  int64     `json:"bytes_received" db:"bytes_received"`
+	BytesSent      int64     `json:"bytes_sent" db:"bytes_sent"`
+	LastUpdatedAt  time.Time `json:"last_updated_at" db:"last_updated_at"`
+}
+
+type NetworkStats struct {
+	ServerID      string    `json:"server_id"`
+	InterfaceName string    `json:"interface_name"`
+	BytesIn       int64     `json:"bytes_in"`
+	BytesOut      int64     `json:"bytes_out"`
+	PacketsIn     int64     `json:"packets_in"`
+	PacketsOut    int64     `json:"packets_out"`
+	Timestamp     time.Time `json:"timestamp"`
+}
+
+type NetworkConnectivityCheck struct {
+	ID           string    `json:"id" db:"id"`
+	ServerID     string    `json:"server_id" db:"server_id"`
+	TargetHost   string    `json:"target_host" db:"target_host"`
+	TargetPort   int       `json:"target_port" db:"target_port"`
+	Protocol     string    `json:"protocol" db:"protocol"`
+	Success      bool      `json:"success" db:"success"`
+	Latency      float64   `json:"latency" db:"latency"` // ms
+	ErrorMessage string    `json:"error_message" db:"error_message"`
+	TestedAt     time.Time `json:"tested_at" db:"tested_at"`
+}
+
+type PortCheckRequest struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"`
+	Timeout  int    `json:"timeout"`
+}
+
+// --- Monitoring / Alert ---
+
+type AlertRule struct {
+	ID        string  `json:"id"`
+	Metric    string  `json:"metric"` // cpu, memory, disk, network
+	Threshold float64 `json:"threshold"`
+	Enabled   bool    `json:"enabled"`
+}
+
+func DefaultAlertRules() []AlertRule {
+	return []AlertRule{
+		{ID: "cpu-high", Metric: "cpu", Threshold: 80.0, Enabled: true},
+		{ID: "memory-high", Metric: "memory", Threshold: 85.0, Enabled: true},
+		{ID: "disk-high", Metric: "disk", Threshold: 90.0, Enabled: true},
+	}
+}
+
+// --- Interfaces ---
+
+type ServerUsecase interface {
+	CreateServer(ctx context.Context, server *Server) error
+	ListServers(ctx context.Context, filter ServerFilter) ([]*Server, int64, error)
+	GetServer(ctx context.Context, id string) (*Server, error)
+	UpdateServer(ctx context.Context, server *Server) error
+	DeleteServer(ctx context.Context, id string) error
+	GetServerMetrics(ctx context.Context, serverID string) (*ServerMetrics, error)
+	HealthCheck(ctx context.Context, serverID string) (bool, error)
+}
+
+type ServerBackupUsecase interface {
+	CreateBackup(ctx context.Context, backup *ServerBackup) error
+	GetBackup(ctx context.Context, id string) (*ServerBackup, error)
+	ListBackups(ctx context.Context, filter BackupFilter) ([]*ServerBackup, int64, error)
+	RestoreBackup(ctx context.Context, backupID string) error
+	DeleteBackup(ctx context.Context, id string) error
+	CleanupExpiredBackups(ctx context.Context) (int64, error)
+	GetBackupStatus(ctx context.Context, backupID string) (*ServerBackup, error)
+}
+
+type ServerServiceUsecase interface {
+	ListServices(ctx context.Context, serverID string) ([]*ServerService, error)
+	GetService(ctx context.Context, id string) (*ServerService, error)
+	GetServiceStatus(ctx context.Context, serverID, serviceName string) (*ServerService, error)
+	PerformAction(ctx context.Context, serverID, serviceName string, action ServiceAction) error
+	GetServiceLogs(ctx context.Context, serverID, serviceName string, lines int) ([]string, error)
+	RefreshServices(ctx context.Context, serverID string) error
+}
+
+type ServerCronjobUsecase interface {
+	CreateCronjob(ctx context.Context, cronjob *ServerCronjob) error
+	GetCronjob(ctx context.Context, id string) (*ServerCronjob, error)
+	ListCronjobs(ctx context.Context, filter CronjobFilter) ([]*ServerCronjob, int64, error)
+	UpdateCronjob(ctx context.Context, cronjob *ServerCronjob) error
+	DeleteCronjob(ctx context.Context, id string) error
+	ExecuteCronjob(ctx context.Context, cronjobID string) error
+	ValidateCronExpression(expression string) error
+	GetExecutionHistory(ctx context.Context, cronjobID string, limit int) ([]*CronjobExecution, error)
+}
+
+type ServerIPTableUsecase interface {
+	ListRules(ctx context.Context, serverID string) ([]*ServerIPTable, error)
+	GetRule(ctx context.Context, id string) (*ServerIPTable, error)
+	AddRule(ctx context.Context, rule *ServerIPTable) error
+	UpdateRule(ctx context.Context, rule *ServerIPTable) error
+	DeleteRule(ctx context.Context, id string) error
+	ApplyRules(ctx context.Context, serverID string) error
+	RefreshRules(ctx context.Context, serverID string) error
+	BackupConfiguration(ctx context.Context, serverID, name, description string) (*IPTableBackup, error)
+	RestoreConfiguration(ctx context.Context, backupID string) error
+	GetBackups(ctx context.Context, serverID string, limit int) ([]*IPTableBackup, error)
+	FlushRules(ctx context.Context, serverID string, chain IPTableChain) error
+}
+
+type ServerNetworkUsecase interface {
+	GetNetworkInterfaces(ctx context.Context, serverID string) ([]*NetworkInterface, error)
+	RefreshNetworkInterfaces(ctx context.Context, serverID string) error
+	GetNetworkStats(ctx context.Context, serverID string) ([]*NetworkStats, error)
+	CheckConnectivity(ctx context.Context, serverID, targetHost string, targetPort int, protocol string) (*NetworkConnectivityCheck, error)
+	TestPort(ctx context.Context, serverID string, request PortCheckRequest) (bool, error)
+	GetConnectivityHistory(ctx context.Context, serverID string, limit int) ([]*NetworkConnectivityCheck, error)
+	MonitorBandwidth(ctx context.Context, serverID string, duration int) ([]*NetworkStats, error)
+}
+
+type AlertUsecase interface {
+	StartMonitoring(ctx context.Context)
+	CheckResources(ctx context.Context)
+}
+
+// --- Repositories ---
+
+type ServerRepository interface {
+	Create(ctx context.Context, server *Server) error
+	GetByID(ctx context.Context, id string) (*Server, error)
+	GetByIPAddress(ctx context.Context, ip string) (*Server, error)
+	List(ctx context.Context, filter ServerFilter) ([]*Server, int64, error)
+	Update(ctx context.Context, server *Server) error
+	UpdateStatus(ctx context.Context, id string, status ServerStatus) error
+	Delete(ctx context.Context, id string) error
+}
+
+type ServerBackupRepository interface {
+	Create(ctx context.Context, backup *ServerBackup) error
+	GetByID(ctx context.Context, id string) (*ServerBackup, error)
+	List(ctx context.Context, filter BackupFilter) ([]*ServerBackup, int64, error)
+	Update(ctx context.Context, backup *ServerBackup) error
+	Delete(ctx context.Context, id string) error
+	DeleteExpired(ctx context.Context) (int64, error)
+}
+
+type ServerServiceRepository interface {
+	Create(ctx context.Context, service *ServerService) error
+	GetByID(ctx context.Context, id string) (*ServerService, error)
+	GetByServerAndName(ctx context.Context, serverID, name string) (*ServerService, error)
+	List(ctx context.Context, filter ServiceFilter) ([]*ServerService, int64, error)
+	Update(ctx context.Context, service *ServerService) error
+	Delete(ctx context.Context, id string) error
+}
+
+type ServerCronjobRepository interface {
+	Create(ctx context.Context, cronjob *ServerCronjob) error
+	GetByID(ctx context.Context, id string) (*ServerCronjob, error)
+	List(ctx context.Context, filter CronjobFilter) ([]*ServerCronjob, int64, error)
+	Update(ctx context.Context, cronjob *ServerCronjob) error
+	Delete(ctx context.Context, id string) error
+	CreateExecution(ctx context.Context, execution *CronjobExecution) error
+	GetExecutions(ctx context.Context, cronjobID string, limit int) ([]*CronjobExecution, error)
+}
+
+type ServerIPTableRepository interface {
+	Create(ctx context.Context, rule *ServerIPTable) error
+	GetByID(ctx context.Context, id string) (*ServerIPTable, error)
+	GetByServerID(ctx context.Context, serverID string) ([]*ServerIPTable, error)
+	Update(ctx context.Context, rule *ServerIPTable) error
+	Delete(ctx context.Context, id string) error
+	CreateBackup(ctx context.Context, backup *IPTableBackup) error
+	GetBackupByID(ctx context.Context, id string) (*IPTableBackup, error)
+	GetBackups(ctx context.Context, serverID string, limit int) ([]*IPTableBackup, error)
+}
+
+type ServerNetworkRepository interface {
+	CreateInterface(ctx context.Context, iface *NetworkInterface) error
+	GetInterfacesByServerID(ctx context.Context, serverID string) ([]*NetworkInterface, error)
+	UpdateInterface(ctx context.Context, iface *NetworkInterface) error
+	DeleteInterfacesByServerID(ctx context.Context, serverID string) error
+	CreateConnectivityCheck(ctx context.Context, check *NetworkConnectivityCheck) error
+	GetConnectivityHistory(ctx context.Context, serverID string, limit int) ([]*NetworkConnectivityCheck, error)
+}
