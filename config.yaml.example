@@ -1,0 +1,123 @@
+# EINFRA CRM Backend Configuration
+# Copy this file to config.yaml and update with your settings
+
+server:
+  port: ":8080"
+  host: "0.0.0.0"
+  read_timeout: "30s"
+  write_timeout: "30s"
+  shutdown_timeout: "10s"
+  mode: "debug"  # debug, release, test
+
+db:
+  postgres_url: "postgres://einfra:einfra123@localhost:5432/einfra_crm?sslmode=disable"
+  max_open_conns: 25
+  max_idle_conns: 5
+  conn_max_lifetime: 300  # seconds
+  auto_migrate: true
+
+auth:
+  jwt_secret: "your-super-secret-jwt-key-change-this-in-production"
+  jwt_expiration: 3600  # seconds (1 hour)
+  
+  google:
+    client_id: "YOUR_GOOGLE_CLIENT_ID"
+    client_secret: "YOUR_GOOGLE_CLIENT_SECRET"
+    redirect_url: "http://localhost:8080/api/oauth/google/callback"
+    scopes:
+      - "https://www.googleapis.com/auth/userinfo.email"
+      - "https://www.googleapis.com/auth/userinfo.profile"
+  
+  azure:
+    client_id: "YOUR_AZURE_CLIENT_ID"
+    client_secret: "YOUR_AZURE_CLIENT_SECRET"
+    redirect_url: "http://localhost:8080/api/oauth/azure/callback"
+    tenant: "common"  # Can be 'common', 'organizations', a domain, or a Tenant ID
+    scopes:
+      - "https://graph.microsoft.com/.default"
+
+smtp:
+  host: "smtp.gmail.com"
+  port: 587
+  user: "your-email@gmail.com"
+  password: "your-app-password"
+  from: "noreply@einfra.com"
+
+storage:
+  image_path: "./uploads/images"
+  max_size_mb: 10
+  allowed_ext:
+    - "jpg"
+    - "jpeg"
+    - "png"
+    - "gif"
+    - "webp"
+
+infrastructure:
+  docker:
+    default_host: "unix:///var/run/docker.sock"
+    api_version: "1.43"
+    request_timeout: 30  # seconds
+    tls_verify: false
+  
+  k8s:
+    default_context: "default"
+    config_path: "~/.kube/config"
+    request_timeout: 30  # seconds
+  
+  harbor:
+    default_url: "https://harbor.example.com"
+    username: "admin"
+    password: "Harbor12345"
+    request_timeout: 30  # seconds
+    insecure: false  # Set to true to skip TLS verification
+
+monitoring:
+  enabled: true
+  prometheus_port: ":9090"
+  metrics_path: "/metrics"
+
+logging:
+  level: "info"  # debug, info, warn, error, fatal
+  format: "json"  # json, text
+  output: "stdout"  # stdout, file
+  file_path: "./logs/app.log"
+  max_size_mb: 100
+  max_backups: 3
+  max_age_days: 28
+  compress: true
+
+rate_limit:
+  enabled: true
+  requests_per_min: 100
+  burst: 20
+
+# Redis configuration (optional)
+redis:
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 10
+
+# MinIO configuration (optional)
+minio:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  use_ssl: false
+  bucket: "einfra-crm"
+
+# Kafka configuration (optional)
+kafka:
+  brokers:
+    - "localhost:9092"
+  topic: "einfra-events"
+  group_id: "einfra-crm-group"
+
+# Keycloak configuration (optional)
+keycloak:
+  url: "http://localhost:8080"
+  realm: "einfra"
+  client_id: "einfra-crm"
+  client_secret: "your-client-secret"

@@ -1,0 +1,31 @@
+
+server:
+  port: ":8080"
+
+auth:
+  # JWT secret should be set via environment variable for security.
+  # DO NOT commit the secret to version control.
+  jwt_secret: ""
+
+  google:
+    client_id: "YOUR_GOOGLE_CLIENT_ID"
+    client_secret: "YOUR_GOOGLE_CLIENT_SECRET"
+    redirect_url: "http://localhost:8080/oauth/google/callback"
+    scopes:
+      - "https://www.googleapis.com/auth/userinfo.email"
+      - "https://www.googleapis.com/auth/userinfo.profile"
+
+  azure:
+    client_id: "YOUR_AZURE_CLIENT_ID"
+    client_secret: "YOUR_AZURE_CLIENT_SECRET"
+    redirect_url: "http://localhost:8080/oauth/azure/callback"
+    tenant: "YOUR_AZURE_TENANT_ID" # Can be 'common', 'organizations', a domain, or a Tenant ID
+    scopes:
+      - "https://graph.microsoft.com/.default"
+
+smtp:
+  host: "smtp.example.com"
+  port: 587
+  username: "your-email@example.com"
+  password: "YOUR_SMTP_PASSWORD" # Use environment variable
+  from: "your-email@example.com"
