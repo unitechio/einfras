@@ -22,6 +22,7 @@ import (
 // Config holds all agent runtime configuration.
 type Config struct {
 	ControlPlaneURL   string
+	GRPCURL           string
 	AgentToken        string
 	ServerID          string
 	Version           string
@@ -37,6 +38,7 @@ func Load() *Config {
 		ServerID:          requireEnv("SERVER_ID"),
 		Version:           getEnvOrDefault("AGENT_VERSION", "1.0.0"),
 		HeartbeatInterval: parseDuration("HEARTBEAT_INTERVAL", 15*time.Second),
+		GRPCURL:           getEnvOrDefault("GRPC_URL", "localhost:50051"),
 	}
 	return cfg
 }

@@ -20,6 +20,8 @@ message ControlMessage {
         ExecuteTask execute_task = 10;
         TriggerSkill trigger_skill = 11;
         CancelExecution cancel_execution = 12;
+        ServiceAction service_action = 13;
+        ListServices list_services = 14;
     }
 }
 
@@ -42,6 +44,17 @@ message CancelExecution {
     string target_task_id = 1;
 }
 
+// ServiceAction instructs the agent to perform an action on a system service.
+message ServiceAction {
+    string service_name = 1;
+    string action = 2; // start, stop, restart, enable, disable
+}
+
+// ListServices requests the agent to return a list of system services.
+message ListServices {
+    string filter_pattern = 1;
+}
+
 // ─── Messages sent from Agent TO Control Plane ──────────────────────────────
 
 message AgentEvent {
@@ -54,7 +67,21 @@ message AgentEvent {
         Heartbeat heartbeat = 11;
         TaskOutput task_output = 12;
         SkillExecutionResult skill_result = 13;
+        ServiceListResponse service_list = 14;
     }
+}
+
+// ServiceListResponse is the response to a ListServices command.
+message ServiceListResponse {
+    string request_id = 1;
+    repeated ServiceEntry services = 2;
+}
+
+message ServiceEntry {
+    string name = 1;
+    string description = 2;
+    string status = 3; // active, inactive, failed
+    string startup = 4; // enabled, disabled
 }
 
 message RegisterRequest {

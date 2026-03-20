@@ -11,8 +11,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
+ 
 	"github.com/rs/zerolog/log"
+	agentpb "einfra/api/internal/modules/agent/infrastructure/grpcpb"
 )
 
 const (
@@ -24,8 +25,8 @@ const (
 type GRPCAgentConn struct {
 	ServerID string
 
-	stream  agentpb.AgentService_ConnectServer
-	sendCh  chan *agentpb.AgentCommand
+	stream  agentpb.AgentService_ConnectStreamServer
+	sendCh  chan *agentpb.ControlMessage
 	closeCh chan struct{}
 	once    sync.Once
 
@@ -35,11 +36,11 @@ type GRPCAgentConn struct {
 }
 
 // NewGRPCAgentConn creates a new gRPC agent connection wrapper and starts the send loop.
-func NewGRPCAgentConn(serverID string, stream agentpb.AgentService_ConnectServer) *GRPCAgentConn {
+func NewGRPCAgentConn(serverID string, stream agentpb.AgentService_ConnectStreamServer) *GRPCAgentConn {
 	c := &GRPCAgentConn{
 		ServerID: serverID,
 		stream:   stream,
-		sendCh:   make(chan *agentpb.AgentCommand, grpcSendBufSize),
+		sendCh:   make(chan *agentpb.ControlMessage, grpcSendBufSize),
 		closeCh:  make(chan struct{}),
 	}
 	go c.sendLoop()
@@ -58,20 +59,20 @@ func (c *GRPCAgentConn) Send(msg any) error {
 		c.paused.Store(false) // pause window expired
 	}
 
-	// Build AgentCommand from the passed msg (supports map[string]any or *agentpb.AgentCommand)
-	var cmd *agentpb.AgentCommand
+	// Build ControlMessage from the passed msg (supports map[string]any or *agentpb.ControlMessage)
+	var cmd *agentpb.ControlMessage
 	switch v := msg.(type) {
-	case *agentpb.AgentCommand:
+	case *agentpb.ControlMessage:
 		cmd = v
 	case map[string]any:
-		cmd = mapToAgentCommand(v)
+		cmd = mapToControlMessage(v)
 	default:
 		// JSON round-trip fallback
 		b, err := json.Marshal(msg)
 		if err != nil {
 			return fmt.Errorf("marshal command: %w", err)
 		}
-		cmd = &agentpb.AgentCommand{}
+		cmd = &agentpb.ControlMessage{}
 		if err := json.Unmarshal(b, cmd); err != nil {
 			return fmt.Errorf("unmarshal command: %w", err)
 		}
@@ -80,6 +81,8 @@ func (c *GRPCAgentConn) Send(msg any) error {
 	select {
 	case c.sendCh <- cmd:
 		return nil
+	case <-time.After(sendTimeout):
+		return fmt.Errorf("agent %q send timeout — backpressure applied", c.ServerID)
 	default:
 		return fmt.Errorf("agent %q send buffer full — backpressure applied", c.ServerID)
 	}
@@ -120,12 +123,12 @@ func (c *GRPCAgentConn) sendLoop() {
 	}
 }
 
-// mapToAgentCommand converts a generic map (dispatcher legacy format) to AgentCommand.
-func mapToAgentCommand(m map[string]any) *agentpb.AgentCommand {
-	cmd := &agentpb.AgentCommand{}
+// mapToControlMessage converts a generic map (dispatcher legacy format) to ControlMessage.
+func mapToControlMessage(m map[string]any) *agentpb.ControlMessage {
+	cmd := &agentpb.ControlMessage{}
 
 	if id, ok := m["message_id"].(string); ok {
-		cmd.CommandID = id
+		cmd.MessageId = id
 	}
 	if ikey, ok := m["idempotency_key"].(string); ok {
 		cmd.IdempotencyKey = ikey
@@ -136,20 +139,46 @@ func mapToAgentCommand(m map[string]any) *agentpb.AgentCommand {
 
 	switch msgType {
 	case "EXEC_COMMAND":
-		exec := &agentpb.ExecCommand{}
+		exec := &agentpb.ExecuteTask{}
 		if c, ok := payload["cmd"].(string); ok {
 			exec.Cmd = c
 		}
 		if t, ok := payload["timeout_s"].(int); ok {
 			exec.TimeoutS = int32(t)
 		}
-		cmd.Exec = exec
+		if t, ok := payload["timeout_s"].(float64); ok {
+			exec.TimeoutS = int32(t)
+		}
+		if tID, ok := payload["task_id"].(string); ok {
+			exec.TaskId = tID
+		} else {
+			exec.TaskId = cmd.MessageId
+		}
+		cmd.Payload = &agentpb.ControlMessage_ExecuteTask{ExecuteTask: exec}
+
 	case "CANCEL_COMMAND":
 		if tid, ok := payload["target_command_id"].(string); ok {
-			cmd.Cancel = &agentpb.CancelCommand{TargetCommandID: tid}
+			cmd.Payload = &agentpb.ControlMessage_CancelExecution{
+				CancelExecution: &agentpb.CancelExecution{TargetTaskId: tid},
+			}
 		}
-	case "PING":
-		cmd.Ping = &agentpb.PingCommand{}
+
+	case "SERVICE_ACTION":
+		sa := &agentpb.ServiceAction{}
+		if svc, ok := payload["service_name"].(string); ok {
+			sa.ServiceName = svc
+		}
+		if act, ok := payload["action"].(string); ok {
+			sa.Action = act
+		}
+		cmd.Payload = &agentpb.ControlMessage_ServiceAction{ServiceAction: sa}
+
+	case "LIST_SERVICES":
+		ls := &agentpb.ListServices{}
+		if fp, ok := payload["filter"].(string); ok {
+			ls.FilterPattern = fp
+		}
+		cmd.Payload = &agentpb.ControlMessage_ListServices{ListServices: ls}
 	}
 	return cmd
 }
@@ -157,7 +186,7 @@ func mapToAgentCommand(m map[string]any) *agentpb.AgentCommand {
 // ─── Hub gRPC extension ──────────────────────────────────────────────────────
 
 // RegisterGRPCAgent adds a gRPC agent connection to the hub.
-func (h *Hub) RegisterGRPCAgent(serverID string, stream agentpb.AgentService_ConnectServer) *GRPCAgentConn {
+func (h *Hub) RegisterGRPCAgent(serverID string, stream agentpb.AgentService_ConnectStreamServer) *GRPCAgentConn {
 	conn := NewGRPCAgentConn(serverID, stream)
 
 	h.agentMu.Lock()

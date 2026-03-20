@@ -49,6 +49,16 @@ run:
 	@echo "$(GREEN)Running the application...$(NC)"
 	@go run $(MAIN_PATH)
 
+# Build the agent
+agent-build:
+	@echo "$(GREEN)Building EINFRA Agent...$(NC)"
+	@go build -o einfra-agent ./api/cmd/agent/main.go
+
+# Run the agent (requires env vars)
+agent-run:
+	@echo "$(GREEN)Running EINFRA Agent...$(NC)"
+	@go run ./api/cmd/agent/main.go
+
 # Run tests
 test:
 	@echo "$(GREEN)Running tests...$(NC)"

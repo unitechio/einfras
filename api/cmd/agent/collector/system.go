@@ -1,6 +1,3 @@
-// Package collector gathers system metrics (CPU, RAM, disk) for the heartbeat.
-// Uses only standard library — no external gopsutil dependency for minimal binary size.
-// For richer metrics, swap the implementations out for gopsutil.
 package collector
 
 import (
@@ -11,9 +8,9 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// SystemMetrics holds the collected system metrics snapshot.
 type SystemMetrics struct {
 	CPUPercent  float64 `json:"cpu_percent"`
 	MemPercent  float64 `json:"mem_percent"`
@@ -24,7 +21,6 @@ type SystemMetrics struct {
 	HasK8s      bool    `json:"has_k8s"`
 }
 
-// Collect gathers system metrics.
 func Collect() SystemMetrics {
 	return SystemMetrics{
 		CPUPercent:  getCPUPercent(),
@@ -43,7 +39,7 @@ func commandExists(name string) bool {
 	return err == nil
 }
 
-// getCPUPercent returns a rough CPU usage percentage (Linux /proc/stat).
+// getCPUPercent returns the CPU usage percentage using dual-sample measurement from /proc/stat.
 // Returns 0 on non-Linux systems.
 func getCPUPercent() float64 {
 	if runtime.GOOS != "linux" {
@@ -53,7 +49,7 @@ func getCPUPercent() float64 {
 	read := func() (idle, total uint64) {
 		f, err := os.Open("/proc/stat")
 		if err != nil {
-			return
+			return 0, 0
 		}
 		defer f.Close()
 
@@ -67,7 +63,7 @@ func getCPUPercent() float64 {
 			for i, field := range fields[1:] {
 				n, _ := strconv.ParseUint(field, 10, 64)
 				total += n
-				if i == 3 { // idle field
+				if i == 3 { // idle field (4th column: user, nice, system, IDLE)
 					idle = n
 				}
 			}
@@ -77,10 +73,22 @@ func getCPUPercent() float64 {
 	}
 
 	idle1, total1 := read()
-	// We'd need two samples for real CPU %. For a heartbeat snapshot this is sufficient.
-	_ = idle1
-	_ = total1
-	return 0 // TODO: implement dual-sample measurement
+	if total1 == 0 {
+		return 0
+	}
+
+	// Sleep briefly between samples to compute the delta
+	time.Sleep(500 * time.Millisecond)
+
+	idle2, total2 := read()
+	if total2 <= total1 {
+		return 0
+	}
+
+	idleDelta := idle2 - idle1
+	totalDelta := total2 - total1
+
+	return (1.0 - float64(idleDelta)/float64(totalDelta)) * 100
 }
 
 // getMemPercent reads /proc/meminfo on Linux.

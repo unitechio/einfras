@@ -394,3 +394,18 @@ export const useAddServer = () => {
     },
   });
 };
+
+export const useAgentToken = () => {
+  return useMutation({
+    mutationFn: async (serverId: string): Promise<{ token: string }> => {
+      const res = await fetch(`/api/v1/servers/${serverId}/agent-token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        throw new Error("Failed to generate agent token");
+      }
+      return res.json();
+    },
+  });
+};

@@ -2,12 +2,16 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	domain "einfra/api/internal/modules/server/domain"
+	"einfra/api/internal/modules/server/application"
 	"einfra/api/pkg/logstream"
 	"einfra/api/pkg/ssh"
 )
@@ -15,16 +19,19 @@ import (
 type serverServiceUsecase struct {
 	serviceRepo domain.ServerServiceRepository
 	serverRepo  domain.ServerRepository
+	dispatcher  application.AgentDispatcher
 }
 
 // NewServerServiceUsecase creates a new server service usecase instance
 func NewServerServiceUsecase(
 	serviceRepo domain.ServerServiceRepository,
 	serverRepo domain.ServerRepository,
+	dispatcher application.AgentDispatcher,
 ) domain.ServerServiceUsecase {
 	return &serverServiceUsecase{
 		serviceRepo: serviceRepo,
 		serverRepo:  serverRepo,
+		dispatcher:  dispatcher,
 	}
 }
 
@@ -126,11 +133,6 @@ func (u *serverServiceUsecase) PerformAction(ctx context.Context, serverID, serv
 		}
 	}
 
-	// Execute action via SSH
-	if err := u.executeServiceAction(ctx, server, serviceName, action); err != nil {
-		return err
-	}
-
 	// Update service status based on action
 	var newStatus domain.ServiceStatus
 	switch action {
@@ -150,6 +152,25 @@ func (u *serverServiceUsecase) PerformAction(ctx context.Context, serverID, serv
 		service.Status = newStatus
 	}
 	service.LastCheckedAt = time.Now()
+
+	// 1. Try via Agent if online
+	if u.dispatcher.IsAgentOnline(ctx, serverID) {
+		payload, _ := json.Marshal(map[string]any{
+			"service_name": serviceName,
+			"action":       string(action),
+		})
+		sUUID, _ := uuid.Parse(serverID)
+		tUUID, _ := uuid.Parse(server.TenantID)
+		task := domain.NewAgentTask(sUUID, tUUID, domain.TaskTypeServiceAction, string(payload))
+		if err := u.dispatcher.DispatchTask(ctx, task); err == nil {
+			return u.serviceRepo.Update(ctx, service)
+		}
+	}
+
+	// 2. Fallback to SSH
+	if err := u.executeServiceAction(ctx, server, serviceName, action); err != nil {
+		return err
+	}
 
 	return u.serviceRepo.Update(ctx, service)
 }

@@ -5,20 +5,22 @@ import (
 	"log"
 	"time"
 
-	"einfra-agent/client"
-	"einfra-agent/collector"
-	"einfra-agent/config"
+	"einfra/api/cmd/agent/client"
+	"einfra/api/cmd/agent/collector"
+	"einfra/api/cmd/agent/config"
+
+	agentpb "einfra/api/internal/modules/agent/infrastructure/grpcpb"
 )
 
 // Heartbeat sends periodic HEARTBEAT messages to the control plane.
 type Heartbeat struct {
-	client   *client.Client
+	client   *client.GRPCClient
 	cfg      *config.Config
 	interval time.Duration
 }
 
 // New creates a new Heartbeat sender.
-func New(c *client.Client, cfg *config.Config, interval time.Duration) *Heartbeat {
+func New(c *client.GRPCClient, cfg *config.Config, interval time.Duration) *Heartbeat {
 	return &Heartbeat{client: c, cfg: cfg, interval: interval}
 }
 
@@ -36,21 +38,13 @@ func (h *Heartbeat) Start() {
 func (h *Heartbeat) send() {
 	metrics := collector.Collect()
 
-	payload := map[string]any{
-		"cpu_percent":   metrics.CPUPercent,
-		"mem_percent":   metrics.MemPercent,
-		"disk_percent":  metrics.DiskPercent,
-		"os":            metrics.OS,
-		"arch":          metrics.Arch,
-		"has_docker":    metrics.HasDocker,
-		"has_k8s":       metrics.HasK8s,
-		"agent_version": h.cfg.Version,
-	}
-
-	h.client.Send(map[string]any{
-		"type":      "HEARTBEAT",
-		"server_id": h.cfg.ServerID,
-		"ts":        time.Now().UnixMilli(),
-		"payload":   payload,
+	h.client.SendEvent(&agentpb.AgentEvent{
+		Payload: &agentpb.AgentEvent_Heartbeat{
+			Heartbeat: &agentpb.Heartbeat{
+				CpuPercent:    float32(metrics.CPUPercent),
+				MemPercent:    float32(metrics.MemPercent),
+				UptimeSeconds: 0, // TODO: add to metrics
+			},
+		},
 	})
 }

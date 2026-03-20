@@ -9,4 +9,5 @@ import (
 // The interface acts as the Port for external services (infrastructure).
 type AgentDispatcher interface {
 	DispatchTask(ctx context.Context, task *domain.AgentTask) error
+	IsAgentOnline(ctx context.Context, serverID string) bool
 }

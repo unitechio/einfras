@@ -18,7 +18,7 @@ type serverUsecase struct {
 
 func NewServerUsecase(serverRepo domain.ServerRepository, tunnelManager *ssh.TunnelManager) domain.ServerUsecase {
 	return &serverUsecase{
-		serverRepo:    serverRepo,
+		serverRepo:    serverRepo, 
 		tunnelManager: tunnelManager,
 		sshClients:    make(map[string]*ssh.Client),
 	}

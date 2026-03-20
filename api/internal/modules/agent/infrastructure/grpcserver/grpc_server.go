@@ -15,14 +15,14 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"einfra/api/internal/domain"
+	"einfra/api/internal/modules/agent/domain"
 	agentregistry "einfra/api/internal/modules/agent/application"
 	agentpb "einfra/api/internal/modules/agent/infrastructure/grpcpb"
 )
 
 // AgentInfoUpdater updates agent info in the database on connect/disconnect.
 type AgentInfoUpdater interface {
-	Upsert(serverID string, info *domain.AgentInfo) error
+	Upsert(serverID string, info *agent.AgentInfo) error
 	SetOnline(serverID string, online bool) error
 }
 
@@ -33,18 +33,24 @@ type AgentTokenValidatorGRPC interface {
 
 // CommandUpdater updates command status after agent reports completion.
 type CommandUpdater interface {
-	UpdateStatus(ctx context.Context, id string, status domain.CommandStatus, exitCode *int) error
-	AppendLog(ctx context.Context, l *domain.CommandLog) error
+	UpdateStatus(ctx context.Context, id string, status agent.CommandStatus, exitCode *int) error
+	AppendLog(ctx context.Context, l *agent.CommandLog) error
+}
+
+// ServiceUpdater updates system services in the database.
+type ServiceUpdater interface {
+	UpdateServices(ctx context.Context, serverID string, services []*agentpb.ServiceEntry) error
 }
 
 // Server implements agentpb.AgentServiceServer.
 type Server struct {
 	agentpb.UnimplementedAgentServiceServer
-	hub        *agentregistry.Hub
-	agentRepo  AgentInfoUpdater
-	tokenSvc   AgentTokenValidatorGRPC
-	cmdRepo    CommandUpdater
-	grpcServer *grpc.Server
+	hub         *agentregistry.Hub
+	agentRepo   AgentInfoUpdater
+	tokenSvc    AgentTokenValidatorGRPC
+	cmdRepo     CommandUpdater
+	serviceRepo ServiceUpdater
+	grpcServer  *grpc.Server
 }
 
 // New creates a new gRPC agent server.
@@ -53,12 +59,14 @@ func New(
 	agentRepo AgentInfoUpdater,
 	tokenSvc AgentTokenValidatorGRPC,
 	cmdRepo CommandUpdater,
+	serviceRepo ServiceUpdater,
 ) *Server {
 	return &Server{
-		hub:       hub,
-		agentRepo: agentRepo,
-		tokenSvc:  tokenSvc,
-		cmdRepo:   cmdRepo,
+		hub:         hub,
+		agentRepo:   agentRepo,
+		tokenSvc:    tokenSvc,
+		cmdRepo:     cmdRepo,
+		serviceRepo: serviceRepo,
 	}
 }
 
@@ -152,7 +160,7 @@ func (s *Server) handleEvent(ctx context.Context, serverID string, event *agentp
 	switch p := event.Payload.(type) {
 	case *agentpb.AgentEvent_Register:
 		reg := p.Register
-		info := &domain.AgentInfo{
+		info := &agent.AgentInfo{
 			ServerID: serverID,
 			Online:   true,
 			LastSeen: time.Now(),
@@ -171,7 +179,7 @@ func (s *Server) handleEvent(ctx context.Context, serverID string, event *agentp
 
 	case *agentpb.AgentEvent_Heartbeat:
 		hb := p.Heartbeat
-		info := &domain.AgentInfo{ServerID: serverID, Online: true, LastSeen: time.Now()}
+		info := &agent.AgentInfo{ServerID: serverID, Online: true, LastSeen: time.Now()}
 		_ = s.agentRepo.Upsert(serverID, info)
 		s.hub.BroadcastToClients(serverID, map[string]any{
 			"type":      "HEARTBEAT",
@@ -186,7 +194,7 @@ func (s *Server) handleEvent(ctx context.Context, serverID string, event *agentp
 		if out.TaskId == "" {
 			return nil
 		}
-		l := &domain.CommandLog{
+		l := &agent.CommandLog{
 			CommandID: out.TaskId,
 			Chunk:     string(out.Data),
 			Seq:       int(out.Seq),
@@ -206,9 +214,9 @@ func (s *Server) handleEvent(ctx context.Context, serverID string, event *agentp
 	case *agentpb.AgentEvent_SkillResult:
 		res := p.SkillResult
 		exitCode := int(res.ExitCode)
-		cmdStatus := domain.StatusSuccess
+		cmdStatus := agent.StatusSuccess
 		if exitCode != 0 {
-			cmdStatus = domain.StatusFailed
+			cmdStatus = agent.StatusFailed
 		}
 		if s.cmdRepo != nil {
 			_ = s.cmdRepo.UpdateStatus(ctx, res.TaskId, cmdStatus, &exitCode)
@@ -222,6 +230,18 @@ func (s *Server) handleEvent(ctx context.Context, serverID string, event *agentp
 			"final_out":   res.FinalOutput,
 			"error":       res.ErrorReason,
 			"duration_ms": res.DurationMs,
+		})
+
+	case *agentpb.AgentEvent_ServiceList:
+		sl := p.ServiceList
+		if s.serviceRepo != nil {
+			_ = s.serviceRepo.UpdateServices(ctx, serverID, sl.Services)
+		}
+		s.hub.BroadcastToClients(serverID, map[string]any{
+			"type":       "SERVICE_LIST",
+			"server_id":  serverID,
+			"request_id": sl.RequestId,
+			"services":   sl.Services,
 		})
 	}
 	return nil

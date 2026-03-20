@@ -14,6 +14,7 @@ const (
 	StatusFailed    CommandStatus = "FAILED"
 	StatusCancelled CommandStatus = "CANCELLED"
 	StatusTimeout   CommandStatus = "TIMEOUT"
+	StatusError     CommandStatus = "ERROR"
 )
 
 // Command represents a command sent from the control plane to an agent.
@@ -68,7 +69,7 @@ type AgentToken struct {
 
 // CPMessage is the envelope sent from the Control Plane to the Agent.
 type CPMessage struct {
-	Type      string      `json:"type"`       // EXEC_COMMAND | PING | CONFIG_UPDATE | CANCEL_COMMAND
+	Type      string      `json:"type"`       // EXEC_COMMAND | SERVICE_ACTION | LIST_SERVICES | PING | CONFIG_UPDATE | CANCEL_COMMAND
 	MessageID string      `json:"message_id"` // UUID for correlation
 	Payload   interface{} `json:"payload"`
 }
@@ -120,4 +121,23 @@ type HeartbeatPayload struct {
 	HasDocker   bool    `json:"has_docker"`
 	HasK8s      bool    `json:"has_k8s"`
 	AgentVersion string `json:"agent_version"`
+}
+
+// ServiceActionPayload is the payload to perform an action on a service.
+type ServiceActionPayload struct {
+	ServiceName string `json:"service_name"`
+	Action      string `json:"action"` // start | stop | restart | reload | enable | disable
+}
+
+// ServiceListPayload is the response to LIST_SERVICES.
+type ServiceListPayload struct {
+	Services []ServiceEntry `json:"services"`
+}
+
+type ServiceEntry struct {
+	Name        string `json:"name"`
+	Status      string `json:"status"` // active | inactive | failed
+	LoadState   string `json:"load_state"`
+	SubState    string `json:"sub_state"`
+	Description string `json:"description"`
 }

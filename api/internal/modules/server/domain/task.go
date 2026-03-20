@@ -13,6 +13,8 @@ const (
 	TaskTypeInstall    TaskType = "INSTALL"
 	TaskTypeDeploy     TaskType = "DEPLOY"
 	TaskTypePullImage  TaskType = "PULL_IMAGE"
+	TaskTypeServiceAction TaskType = "SERVICE_ACTION"
+	TaskTypeListServices  TaskType = "LIST_SERVICES"
 )
 
 type TaskStatus string

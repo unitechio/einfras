@@ -21,9 +21,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"einfra-agent/client"
-	"einfra-agent/config"
-	"einfra-agent/heartbeat"
+	"einfra/api/cmd/agent/client"
+	"einfra/api/cmd/agent/config"
+	"einfra/api/cmd/agent/heartbeat"
 )
 
 func main() {
@@ -33,7 +33,7 @@ func main() {
 	log.Printf("[agent] EINFRA Agent v%s starting", cfg.Version)
 	log.Printf("[agent] server_id=%s → %s", cfg.ServerID, cfg.ControlPlaneURL)
 
-	c := client.New(cfg)
+	c := client.NewGRPC(cfg)
 
 	// Start periodic heartbeat
 	hb := heartbeat.New(c, cfg, cfg.HeartbeatInterval)

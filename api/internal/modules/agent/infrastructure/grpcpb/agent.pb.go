@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.34.0
-// source: internal/modules/agent/interfaces/grpc/proto/agent.proto
+// source: api/internal/modules/agent/interfaces/grpc/proto/agent.proto
 
 package grpcpb
 
@@ -30,6 +30,8 @@ type ControlMessage struct {
 	//	*ControlMessage_ExecuteTask
 	//	*ControlMessage_TriggerSkill
 	//	*ControlMessage_CancelExecution
+	//	*ControlMessage_ServiceAction
+	//	*ControlMessage_ListServices
 	Payload       isControlMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -37,7 +39,7 @@ type ControlMessage struct {
 
 func (x *ControlMessage) Reset() {
 	*x = ControlMessage{}
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[0]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -49,7 +51,7 @@ func (x *ControlMessage) String() string {
 func (*ControlMessage) ProtoMessage() {}
 
 func (x *ControlMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[0]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -62,7 +64,7 @@ func (x *ControlMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ControlMessage.ProtoReflect.Descriptor instead.
 func (*ControlMessage) Descriptor() ([]byte, []int) {
-	return file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{0}
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *ControlMessage) GetMessageId() string {
@@ -113,6 +115,24 @@ func (x *ControlMessage) GetCancelExecution() *CancelExecution {
 	return nil
 }
 
+func (x *ControlMessage) GetServiceAction() *ServiceAction {
+	if x != nil {
+		if x, ok := x.Payload.(*ControlMessage_ServiceAction); ok {
+			return x.ServiceAction
+		}
+	}
+	return nil
+}
+
+func (x *ControlMessage) GetListServices() *ListServices {
+	if x != nil {
+		if x, ok := x.Payload.(*ControlMessage_ListServices); ok {
+			return x.ListServices
+		}
+	}
+	return nil
+}
+
 type isControlMessage_Payload interface {
 	isControlMessage_Payload()
 }
@@ -129,11 +149,23 @@ type ControlMessage_CancelExecution struct {
 	CancelExecution *CancelExecution `protobuf:"bytes,12,opt,name=cancel_execution,json=cancelExecution,proto3,oneof"`
 }
 
+type ControlMessage_ServiceAction struct {
+	ServiceAction *ServiceAction `protobuf:"bytes,13,opt,name=service_action,json=serviceAction,proto3,oneof"`
+}
+
+type ControlMessage_ListServices struct {
+	ListServices *ListServices `protobuf:"bytes,14,opt,name=list_services,json=listServices,proto3,oneof"`
+}
+
 func (*ControlMessage_ExecuteTask) isControlMessage_Payload() {}
 
 func (*ControlMessage_TriggerSkill) isControlMessage_Payload() {}
 
 func (*ControlMessage_CancelExecution) isControlMessage_Payload() {}
+
+func (*ControlMessage_ServiceAction) isControlMessage_Payload() {}
+
+func (*ControlMessage_ListServices) isControlMessage_Payload() {}
 
 // ExecuteTask instructs the agent to run a raw shell command or binary.
 type ExecuteTask struct {
@@ -148,7 +180,7 @@ type ExecuteTask struct {
 
 func (x *ExecuteTask) Reset() {
 	*x = ExecuteTask{}
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[1]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -160,7 +192,7 @@ func (x *ExecuteTask) String() string {
 func (*ExecuteTask) ProtoMessage() {}
 
 func (x *ExecuteTask) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[1]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -173,7 +205,7 @@ func (x *ExecuteTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteTask.ProtoReflect.Descriptor instead.
 func (*ExecuteTask) Descriptor() ([]byte, []int) {
-	return file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{1}
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ExecuteTask) GetTaskId() string {
@@ -216,7 +248,7 @@ type TriggerSkill struct {
 
 func (x *TriggerSkill) Reset() {
 	*x = TriggerSkill{}
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[2]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -228,7 +260,7 @@ func (x *TriggerSkill) String() string {
 func (*TriggerSkill) ProtoMessage() {}
 
 func (x *TriggerSkill) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[2]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -241,7 +273,7 @@ func (x *TriggerSkill) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriggerSkill.ProtoReflect.Descriptor instead.
 func (*TriggerSkill) Descriptor() ([]byte, []int) {
-	return file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{2}
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *TriggerSkill) GetTaskId() string {
@@ -274,7 +306,7 @@ type CancelExecution struct {
 
 func (x *CancelExecution) Reset() {
 	*x = CancelExecution{}
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[3]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -286,7 +318,7 @@ func (x *CancelExecution) String() string {
 func (*CancelExecution) ProtoMessage() {}
 
 func (x *CancelExecution) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[3]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -299,12 +331,110 @@ func (x *CancelExecution) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelExecution.ProtoReflect.Descriptor instead.
 func (*CancelExecution) Descriptor() ([]byte, []int) {
-	return file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{3}
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CancelExecution) GetTargetTaskId() string {
 	if x != nil {
 		return x.TargetTaskId
+	}
+	return ""
+}
+
+// ServiceAction instructs the agent to perform an action on a system service.
+type ServiceAction struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ServiceName   string                 `protobuf:"bytes,1,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
+	Action        string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"` // start, stop, restart, enable, disable
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServiceAction) Reset() {
+	*x = ServiceAction{}
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServiceAction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServiceAction) ProtoMessage() {}
+
+func (x *ServiceAction) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServiceAction.ProtoReflect.Descriptor instead.
+func (*ServiceAction) Descriptor() ([]byte, []int) {
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ServiceAction) GetServiceName() string {
+	if x != nil {
+		return x.ServiceName
+	}
+	return ""
+}
+
+func (x *ServiceAction) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+// ListServices requests the agent to return a list of system services.
+type ListServices struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FilterPattern string                 `protobuf:"bytes,1,opt,name=filter_pattern,json=filterPattern,proto3" json:"filter_pattern,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListServices) Reset() {
+	*x = ListServices{}
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListServices) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListServices) ProtoMessage() {}
+
+func (x *ListServices) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListServices.ProtoReflect.Descriptor instead.
+func (*ListServices) Descriptor() ([]byte, []int) {
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ListServices) GetFilterPattern() string {
+	if x != nil {
+		return x.FilterPattern
 	}
 	return ""
 }
@@ -320,6 +450,7 @@ type AgentEvent struct {
 	//	*AgentEvent_Heartbeat
 	//	*AgentEvent_TaskOutput
 	//	*AgentEvent_SkillResult
+	//	*AgentEvent_ServiceList
 	Payload       isAgentEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -327,7 +458,7 @@ type AgentEvent struct {
 
 func (x *AgentEvent) Reset() {
 	*x = AgentEvent{}
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[4]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -339,7 +470,7 @@ func (x *AgentEvent) String() string {
 func (*AgentEvent) ProtoMessage() {}
 
 func (x *AgentEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[4]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -352,7 +483,7 @@ func (x *AgentEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentEvent.ProtoReflect.Descriptor instead.
 func (*AgentEvent) Descriptor() ([]byte, []int) {
-	return file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{4}
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AgentEvent) GetServerId() string {
@@ -419,6 +550,15 @@ func (x *AgentEvent) GetSkillResult() *SkillExecutionResult {
 	return nil
 }
 
+func (x *AgentEvent) GetServiceList() *ServiceListResponse {
+	if x != nil {
+		if x, ok := x.Payload.(*AgentEvent_ServiceList); ok {
+			return x.ServiceList
+		}
+	}
+	return nil
+}
+
 type isAgentEvent_Payload interface {
 	isAgentEvent_Payload()
 }
@@ -439,6 +579,10 @@ type AgentEvent_SkillResult struct {
 	SkillResult *SkillExecutionResult `protobuf:"bytes,13,opt,name=skill_result,json=skillResult,proto3,oneof"`
 }
 
+type AgentEvent_ServiceList struct {
+	ServiceList *ServiceListResponse `protobuf:"bytes,14,opt,name=service_list,json=serviceList,proto3,oneof"`
+}
+
 func (*AgentEvent_Register) isAgentEvent_Payload() {}
 
 func (*AgentEvent_Heartbeat) isAgentEvent_Payload() {}
@@ -446,6 +590,129 @@ func (*AgentEvent_Heartbeat) isAgentEvent_Payload() {}
 func (*AgentEvent_TaskOutput) isAgentEvent_Payload() {}
 
 func (*AgentEvent_SkillResult) isAgentEvent_Payload() {}
+
+func (*AgentEvent_ServiceList) isAgentEvent_Payload() {}
+
+// ServiceListResponse is the response to a ListServices command.
+type ServiceListResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Services      []*ServiceEntry        `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServiceListResponse) Reset() {
+	*x = ServiceListResponse{}
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServiceListResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServiceListResponse) ProtoMessage() {}
+
+func (x *ServiceListResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServiceListResponse.ProtoReflect.Descriptor instead.
+func (*ServiceListResponse) Descriptor() ([]byte, []int) {
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ServiceListResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ServiceListResponse) GetServices() []*ServiceEntry {
+	if x != nil {
+		return x.Services
+	}
+	return nil
+}
+
+type ServiceEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Description   string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`   // active, inactive, failed
+	Startup       string                 `protobuf:"bytes,4,opt,name=startup,proto3" json:"startup,omitempty"` // enabled, disabled
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServiceEntry) Reset() {
+	*x = ServiceEntry{}
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServiceEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServiceEntry) ProtoMessage() {}
+
+func (x *ServiceEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServiceEntry.ProtoReflect.Descriptor instead.
+func (*ServiceEntry) Descriptor() ([]byte, []int) {
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ServiceEntry) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ServiceEntry) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *ServiceEntry) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ServiceEntry) GetStartup() string {
+	if x != nil {
+		return x.Startup
+	}
+	return ""
+}
 
 type RegisterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -459,7 +726,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[5]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -471,7 +738,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[5]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -484,7 +751,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{5}
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *RegisterRequest) GetAgentVersion() string {
@@ -526,7 +793,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[6]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -538,7 +805,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[6]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -551,7 +818,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{6}
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Heartbeat) GetCpuPercent() float32 {
@@ -588,7 +855,7 @@ type TaskOutput struct {
 
 func (x *TaskOutput) Reset() {
 	*x = TaskOutput{}
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[7]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -600,7 +867,7 @@ func (x *TaskOutput) String() string {
 func (*TaskOutput) ProtoMessage() {}
 
 func (x *TaskOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[7]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -613,7 +880,7 @@ func (x *TaskOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskOutput.ProtoReflect.Descriptor instead.
 func (*TaskOutput) Descriptor() ([]byte, []int) {
-	return file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{7}
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *TaskOutput) GetTaskId() string {
@@ -659,7 +926,7 @@ type SkillExecutionResult struct {
 
 func (x *SkillExecutionResult) Reset() {
 	*x = SkillExecutionResult{}
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[8]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -671,7 +938,7 @@ func (x *SkillExecutionResult) String() string {
 func (*SkillExecutionResult) ProtoMessage() {}
 
 func (x *SkillExecutionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[8]
+	mi := &file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -684,7 +951,7 @@ func (x *SkillExecutionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SkillExecutionResult.ProtoReflect.Descriptor instead.
 func (*SkillExecutionResult) Descriptor() ([]byte, []int) {
-	return file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{8}
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SkillExecutionResult) GetTaskId() string {
@@ -729,11 +996,11 @@ func (x *SkillExecutionResult) GetDurationMs() int64 {
 	return 0
 }
 
-var File_internal_modules_agent_interfaces_grpc_proto_agent_proto protoreflect.FileDescriptor
+var File_api_internal_modules_agent_interfaces_grpc_proto_agent_proto protoreflect.FileDescriptor
 
-const file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc = "" +
+const file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc = "" +
 	"\n" +
-	"8internal/modules/agent/interfaces/grpc/proto/agent.proto\x12\bagent.v1\"\xa6\x02\n" +
+	"<api/internal/modules/agent/interfaces/grpc/proto/agent.proto\x12\bagent.v1\"\xa7\x03\n" +
 	"\x0eControlMessage\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12'\n" +
@@ -741,7 +1008,9 @@ const file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc = ""
 	"\fexecute_task\x18\n" +
 	" \x01(\v2\x15.agent.v1.ExecuteTaskH\x00R\vexecuteTask\x12=\n" +
 	"\rtrigger_skill\x18\v \x01(\v2\x16.agent.v1.TriggerSkillH\x00R\ftriggerSkill\x12F\n" +
-	"\x10cancel_execution\x18\f \x01(\v2\x19.agent.v1.CancelExecutionH\x00R\x0fcancelExecutionB\t\n" +
+	"\x10cancel_execution\x18\f \x01(\v2\x19.agent.v1.CancelExecutionH\x00R\x0fcancelExecution\x12@\n" +
+	"\x0eservice_action\x18\r \x01(\v2\x17.agent.v1.ServiceActionH\x00R\rserviceAction\x12=\n" +
+	"\rlist_services\x18\x0e \x01(\v2\x16.agent.v1.ListServicesH\x00R\flistServicesB\t\n" +
 	"\apayload\"\xbf\x01\n" +
 	"\vExecuteTask\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x10\n" +
@@ -760,7 +1029,12 @@ const file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc = ""
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"7\n" +
 	"\x0fCancelExecution\x12$\n" +
-	"\x0etarget_task_id\x18\x01 \x01(\tR\ftargetTaskId\"\xe2\x02\n" +
+	"\x0etarget_task_id\x18\x01 \x01(\tR\ftargetTaskId\"J\n" +
+	"\rServiceAction\x12!\n" +
+	"\fservice_name\x18\x01 \x01(\tR\vserviceName\x12\x16\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\"5\n" +
+	"\fListServices\x12%\n" +
+	"\x0efilter_pattern\x18\x01 \x01(\tR\rfilterPattern\"\xa6\x03\n" +
 	"\n" +
 	"AgentEvent\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x1d\n" +
@@ -772,8 +1046,18 @@ const file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc = ""
 	"\theartbeat\x18\v \x01(\v2\x13.agent.v1.HeartbeatH\x00R\theartbeat\x127\n" +
 	"\vtask_output\x18\f \x01(\v2\x14.agent.v1.TaskOutputH\x00R\n" +
 	"taskOutput\x12C\n" +
-	"\fskill_result\x18\r \x01(\v2\x1e.agent.v1.SkillExecutionResultH\x00R\vskillResultB\t\n" +
-	"\apayload\"~\n" +
+	"\fskill_result\x18\r \x01(\v2\x1e.agent.v1.SkillExecutionResultH\x00R\vskillResult\x12B\n" +
+	"\fservice_list\x18\x0e \x01(\v2\x1d.agent.v1.ServiceListResponseH\x00R\vserviceListB\t\n" +
+	"\apayload\"h\n" +
+	"\x13ServiceListResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x122\n" +
+	"\bservices\x18\x02 \x03(\v2\x16.agent.v1.ServiceEntryR\bservices\"v\n" +
+	"\fServiceEntry\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12\x18\n" +
+	"\astartup\x18\x04 \x01(\tR\astartup\"~\n" +
 	"\x0fRegisterRequest\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12\x0e\n" +
 	"\x02os\x18\x02 \x01(\tR\x02os\x12\x12\n" +
@@ -804,81 +1088,92 @@ const file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc = ""
 	"\rConnectStream\x12\x14.agent.v1.AgentEvent\x1a\x18.agent.v1.ControlMessage\"\x00(\x010\x01B9Z7einfra/api/internal/modules/agent/infrastructure/grpcpbb\x06proto3"
 
 var (
-	file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescOnce sync.Once
-	file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescData []byte
+	file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescOnce sync.Once
+	file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescData []byte
 )
 
-func file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP() []byte {
-	file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescOnce.Do(func() {
-		file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc), len(file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc)))
+func file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescGZIP() []byte {
+	file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescOnce.Do(func() {
+		file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc), len(file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc)))
 	})
-	return file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescData
+	return file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDescData
 }
 
-var file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
-var file_internal_modules_agent_interfaces_grpc_proto_agent_proto_goTypes = []any{
+var file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_goTypes = []any{
 	(*ControlMessage)(nil),       // 0: agent.v1.ControlMessage
 	(*ExecuteTask)(nil),          // 1: agent.v1.ExecuteTask
 	(*TriggerSkill)(nil),         // 2: agent.v1.TriggerSkill
 	(*CancelExecution)(nil),      // 3: agent.v1.CancelExecution
-	(*AgentEvent)(nil),           // 4: agent.v1.AgentEvent
-	(*RegisterRequest)(nil),      // 5: agent.v1.RegisterRequest
-	(*Heartbeat)(nil),            // 6: agent.v1.Heartbeat
-	(*TaskOutput)(nil),           // 7: agent.v1.TaskOutput
-	(*SkillExecutionResult)(nil), // 8: agent.v1.SkillExecutionResult
-	nil,                          // 9: agent.v1.ExecuteTask.EnvEntry
-	nil,                          // 10: agent.v1.TriggerSkill.ContextEntry
+	(*ServiceAction)(nil),        // 4: agent.v1.ServiceAction
+	(*ListServices)(nil),         // 5: agent.v1.ListServices
+	(*AgentEvent)(nil),           // 6: agent.v1.AgentEvent
+	(*ServiceListResponse)(nil),  // 7: agent.v1.ServiceListResponse
+	(*ServiceEntry)(nil),         // 8: agent.v1.ServiceEntry
+	(*RegisterRequest)(nil),      // 9: agent.v1.RegisterRequest
+	(*Heartbeat)(nil),            // 10: agent.v1.Heartbeat
+	(*TaskOutput)(nil),           // 11: agent.v1.TaskOutput
+	(*SkillExecutionResult)(nil), // 12: agent.v1.SkillExecutionResult
+	nil,                          // 13: agent.v1.ExecuteTask.EnvEntry
+	nil,                          // 14: agent.v1.TriggerSkill.ContextEntry
 }
-var file_internal_modules_agent_interfaces_grpc_proto_agent_proto_depIdxs = []int32{
+var file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_depIdxs = []int32{
 	1,  // 0: agent.v1.ControlMessage.execute_task:type_name -> agent.v1.ExecuteTask
 	2,  // 1: agent.v1.ControlMessage.trigger_skill:type_name -> agent.v1.TriggerSkill
 	3,  // 2: agent.v1.ControlMessage.cancel_execution:type_name -> agent.v1.CancelExecution
-	9,  // 3: agent.v1.ExecuteTask.env:type_name -> agent.v1.ExecuteTask.EnvEntry
-	10, // 4: agent.v1.TriggerSkill.context:type_name -> agent.v1.TriggerSkill.ContextEntry
-	5,  // 5: agent.v1.AgentEvent.register:type_name -> agent.v1.RegisterRequest
-	6,  // 6: agent.v1.AgentEvent.heartbeat:type_name -> agent.v1.Heartbeat
-	7,  // 7: agent.v1.AgentEvent.task_output:type_name -> agent.v1.TaskOutput
-	8,  // 8: agent.v1.AgentEvent.skill_result:type_name -> agent.v1.SkillExecutionResult
-	4,  // 9: agent.v1.AgentService.ConnectStream:input_type -> agent.v1.AgentEvent
-	0,  // 10: agent.v1.AgentService.ConnectStream:output_type -> agent.v1.ControlMessage
-	10, // [10:11] is the sub-list for method output_type
-	9,  // [9:10] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	4,  // 3: agent.v1.ControlMessage.service_action:type_name -> agent.v1.ServiceAction
+	5,  // 4: agent.v1.ControlMessage.list_services:type_name -> agent.v1.ListServices
+	13, // 5: agent.v1.ExecuteTask.env:type_name -> agent.v1.ExecuteTask.EnvEntry
+	14, // 6: agent.v1.TriggerSkill.context:type_name -> agent.v1.TriggerSkill.ContextEntry
+	9,  // 7: agent.v1.AgentEvent.register:type_name -> agent.v1.RegisterRequest
+	10, // 8: agent.v1.AgentEvent.heartbeat:type_name -> agent.v1.Heartbeat
+	11, // 9: agent.v1.AgentEvent.task_output:type_name -> agent.v1.TaskOutput
+	12, // 10: agent.v1.AgentEvent.skill_result:type_name -> agent.v1.SkillExecutionResult
+	7,  // 11: agent.v1.AgentEvent.service_list:type_name -> agent.v1.ServiceListResponse
+	8,  // 12: agent.v1.ServiceListResponse.services:type_name -> agent.v1.ServiceEntry
+	6,  // 13: agent.v1.AgentService.ConnectStream:input_type -> agent.v1.AgentEvent
+	0,  // 14: agent.v1.AgentService.ConnectStream:output_type -> agent.v1.ControlMessage
+	14, // [14:15] is the sub-list for method output_type
+	13, // [13:14] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
-func init() { file_internal_modules_agent_interfaces_grpc_proto_agent_proto_init() }
-func file_internal_modules_agent_interfaces_grpc_proto_agent_proto_init() {
-	if File_internal_modules_agent_interfaces_grpc_proto_agent_proto != nil {
+func init() { file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_init() }
+func file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_init() {
+	if File_api_internal_modules_agent_interfaces_grpc_proto_agent_proto != nil {
 		return
 	}
-	file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[0].OneofWrappers = []any{
+	file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[0].OneofWrappers = []any{
 		(*ControlMessage_ExecuteTask)(nil),
 		(*ControlMessage_TriggerSkill)(nil),
 		(*ControlMessage_CancelExecution)(nil),
+		(*ControlMessage_ServiceAction)(nil),
+		(*ControlMessage_ListServices)(nil),
 	}
-	file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[4].OneofWrappers = []any{
+	file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes[6].OneofWrappers = []any{
 		(*AgentEvent_Register)(nil),
 		(*AgentEvent_Heartbeat)(nil),
 		(*AgentEvent_TaskOutput)(nil),
 		(*AgentEvent_SkillResult)(nil),
+		(*AgentEvent_ServiceList)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc), len(file_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc), len(file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_internal_modules_agent_interfaces_grpc_proto_agent_proto_goTypes,
-		DependencyIndexes: file_internal_modules_agent_interfaces_grpc_proto_agent_proto_depIdxs,
-		MessageInfos:      file_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes,
+		GoTypes:           file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_goTypes,
+		DependencyIndexes: file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_depIdxs,
+		MessageInfos:      file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_msgTypes,
 	}.Build()
-	File_internal_modules_agent_interfaces_grpc_proto_agent_proto = out.File
-	file_internal_modules_agent_interfaces_grpc_proto_agent_proto_goTypes = nil
-	file_internal_modules_agent_interfaces_grpc_proto_agent_proto_depIdxs = nil
+	File_api_internal_modules_agent_interfaces_grpc_proto_agent_proto = out.File
+	file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_goTypes = nil
+	file_api_internal_modules_agent_interfaces_grpc_proto_agent_proto_depIdxs = nil
 }

@@ -14,20 +14,21 @@ import (
 
 	"net/http"
 
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
-	"einfra/api/internal/modules/auth/domain"
-	"einfra/api/internal/shared/platform/config"
-	"einfra/api/internal/http/handler"
 	"einfra/api/internal/apps/api-gateway/router_http"
+	"einfra/api/internal/http/handler"
+	"einfra/api/internal/modules/auth/domain"
+	"einfra/api/internal/repository"
 	"einfra/api/internal/shared/infra/database"
 	storage "einfra/api/internal/shared/infra/filestorage"
+	"einfra/api/internal/shared/platform/config"
 	"einfra/api/internal/shared/platform/logger"
-	"einfra/api/internal/repository"
 	"einfra/api/internal/usecase"
 	"einfra/api/pkg/docker"
 	"einfra/api/pkg/security"
 	"einfra/api/pkg/ssh"
+
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 func main() {
