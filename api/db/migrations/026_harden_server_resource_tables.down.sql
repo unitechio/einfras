@@ -1,0 +1,3 @@
+DROP INDEX IF EXISTS idx_network_connectivity_checks_server_target_port;
+DROP INDEX IF EXISTS idx_server_iptables_server_name_position;
+DROP INDEX IF EXISTS idx_server_backups_server_name_created;

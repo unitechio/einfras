@@ -2,15 +2,13 @@ package domain
 
 import (
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // Base DomainEvent interface
 type DomainEvent interface {
 	EventName() string
-	AggregateID() uuid.UUID
-	TenantID() uuid.UUID
+	AggregateID() string
+	TenantID() string
 	OccurredAt() time.Time
 	Payload() interface{}
 }
@@ -26,8 +24,8 @@ type EventPublisher interface {
 
 type ServerCreatedEvent struct {
 	eventName   string
-	aggregateID uuid.UUID
-	tenantID    uuid.UUID
+	aggregateID string
+	tenantID    string
 	occurredAt  time.Time
 	payload     map[string]interface{}
 }
@@ -45,11 +43,11 @@ func NewServerCreatedEvent(server *Server) DomainEvent {
 	}
 }
 
-func (e *ServerCreatedEvent) EventName() string       { return e.eventName }
-func (e *ServerCreatedEvent) AggregateID() uuid.UUID  { return e.aggregateID }
-func (e *ServerCreatedEvent) TenantID() uuid.UUID     { return e.tenantID }
-func (e *ServerCreatedEvent) OccurredAt() time.Time   { return e.occurredAt }
-func (e *ServerCreatedEvent) Payload() interface{}    { return e.payload }
+func (e *ServerCreatedEvent) EventName() string     { return e.eventName }
+func (e *ServerCreatedEvent) AggregateID() string   { return e.aggregateID }
+func (e *ServerCreatedEvent) TenantID() string      { return e.tenantID }
+func (e *ServerCreatedEvent) OccurredAt() time.Time { return e.occurredAt }
+func (e *ServerCreatedEvent) Payload() interface{}  { return e.payload }
 
 // ----------------------------------------------------
 // Example: ServerStatusChangedEvent
@@ -57,8 +55,8 @@ func (e *ServerCreatedEvent) Payload() interface{}    { return e.payload }
 
 type ServerStatusChangedEvent struct {
 	eventName   string
-	aggregateID uuid.UUID
-	tenantID    uuid.UUID
+	aggregateID string
+	tenantID    string
 	occurredAt  time.Time
 	payload     map[string]interface{}
 }
@@ -75,8 +73,8 @@ func NewServerStatusChangedEvent(server *Server, newStatus string) DomainEvent {
 	}
 }
 
-func (e *ServerStatusChangedEvent) EventName() string       { return e.eventName }
-func (e *ServerStatusChangedEvent) AggregateID() uuid.UUID  { return e.aggregateID }
-func (e *ServerStatusChangedEvent) TenantID() uuid.UUID     { return e.tenantID }
-func (e *ServerStatusChangedEvent) OccurredAt() time.Time   { return e.occurredAt }
-func (e *ServerStatusChangedEvent) Payload() interface{}    { return e.payload }
+func (e *ServerStatusChangedEvent) EventName() string     { return e.eventName }
+func (e *ServerStatusChangedEvent) AggregateID() string   { return e.aggregateID }
+func (e *ServerStatusChangedEvent) TenantID() string      { return e.tenantID }
+func (e *ServerStatusChangedEvent) OccurredAt() time.Time { return e.occurredAt }
+func (e *ServerStatusChangedEvent) Payload() interface{}  { return e.payload }

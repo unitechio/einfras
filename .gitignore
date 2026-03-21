@@ -27,3 +27,7 @@ node_modules
 # Go
 bin
 /security_app_bin
+
+
+.gocache
+.gomodcache

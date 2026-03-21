@@ -11,9 +11,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
- 
-	"github.com/rs/zerolog/log"
+
 	agentpb "einfra/api/internal/modules/agent/infrastructure/grpcpb"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -179,6 +179,28 @@ func mapToControlMessage(m map[string]any) *agentpb.ControlMessage {
 			ls.FilterPattern = fp
 		}
 		cmd.Payload = &agentpb.ControlMessage_ListServices{ListServices: ls}
+
+	case "CONTROL_OPERATION":
+		trigger := &agentpb.TriggerSkill{
+			TaskId:    cmd.MessageId,
+			SkillName: "control-operation",
+			Context:   map[string]string{},
+		}
+		if op, ok := payload["operation"].(string); ok {
+			trigger.Context["operation"] = op
+		}
+		if t, ok := payload["timeout_s"].(int); ok {
+			trigger.Context["timeout_s"] = fmt.Sprintf("%d", t)
+		}
+		if t, ok := payload["timeout_s"].(float64); ok {
+			trigger.Context["timeout_s"] = fmt.Sprintf("%d", int(t))
+		}
+		if params, ok := payload["params"].(map[string]any); ok {
+			if raw, err := json.Marshal(params); err == nil {
+				trigger.Context["params_json"] = string(raw)
+			}
+		}
+		cmd.Payload = &agentpb.ControlMessage_TriggerSkill{TriggerSkill: trigger}
 	}
 	return cmd
 }

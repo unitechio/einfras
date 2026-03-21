@@ -26,7 +26,7 @@ func NewClientWSHandler(hub *agentregistry.Hub) *ClientWSHandler {
 func (h *ClientWSHandler) HandleClientWS(w http.ResponseWriter, r *http.Request) {
 	serverID := mux.Vars(r)["server_id"]
 	if serverID == "" {
-		http.Error(w, "server_id required", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "client_ws", "client_ws.connect", "validation_failed", "server_id required", nil)
 		return
 	}
 

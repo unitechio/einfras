@@ -29,14 +29,14 @@ func (h *SkillHandler) TriggerWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	var req TriggerAIWorkflowRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		writeError(w, http.StatusBadRequest, "ai_workflow", "ai_workflow.trigger", "invalid_request", "invalid json", nil)
 		return
 	}
 
 	// For an asynchronous long-running task, we should return ACCEPTED (202)
 	// and run the orchestrator in a goroutine. However, for demo/blocking APIs
 	// we await the result directly.
-	
+
 	// Start async processing
 	go func() {
 		_, err := h.orchestrator.RunAIPipeline(context.Background(), serverID, req.UserPrompt)
@@ -46,9 +46,9 @@ func (h *SkillHandler) TriggerWorkflow(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	writeJSON(w, http.StatusAccepted, map[string]string{
+	writeJSON(w, http.StatusAccepted, actionEnvelope("accepted", "ai_workflow", "ai_workflow.trigger", nil, map[string]string{
 		"message":   "workflow started",
 		"server_id": serverID,
 		"prompt":    req.UserPrompt,
-	})
+	}, nil))
 }

@@ -2,12 +2,11 @@ package infrastructure
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"einfra/api/internal/modules/agent/domain"
+	agent "einfra/api/internal/modules/agent/domain"
 )
 
 // AntigravitySkillLoader loads .md and YAML definitions from the user's home Antigravity directory.
@@ -22,8 +21,8 @@ func NewAntigravitySkillLoader() *AntigravitySkillLoader {
 	}
 }
 
-func (l *AntigravitySkillLoader) LoadAvailableSkills(ctx context.Context) (map[string]*domain.Skill, error) {
-	skills := make(map[string]*domain.Skill)
+func (l *AntigravitySkillLoader) LoadAvailableSkills(ctx context.Context) (map[string]*agent.Skill, error) {
+	skills := make(map[string]*agent.Skill)
 
 	// In case the directory doesn't exist yet, we don't crash, we just return empty.
 	if _, err := os.Stat(l.skillsDir); os.IsNotExist(err) {
@@ -34,20 +33,20 @@ func (l *AntigravitySkillLoader) LoadAvailableSkills(ctx context.Context) (map[s
 		if err != nil {
 			return nil
 		}
-		
+
 		// Antigravity skills primarily have a SKILL.md definition
 		if !info.IsDir() && strings.HasSuffix(info.Name(), "SKILL.md") {
 			contentBytes, err := os.ReadFile(path)
 			if err != nil {
 				return nil
 			}
-			
+
 			// We parse the exact name from the parent folder mapping, e.g. "security_auditor"
 			dirName := filepath.Base(filepath.Dir(path))
 			skillName := "@" + strings.ReplaceAll(dirName, "_", "-")
-			
+
 			// Build minimal domain skill definition
-			skill := &domain.Skill{
+			skill := &agent.Skill{
 				Name:        skillName,
 				Description: extractYAMLDescription(string(contentBytes)),
 				SourceFile:  path,

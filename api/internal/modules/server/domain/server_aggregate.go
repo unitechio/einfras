@@ -12,7 +12,7 @@ const (
 	ServerStatusOnline      ServerStatus = "online"
 	ServerStatusOffline     ServerStatus = "offline"
 	ServerStatusMaintenance ServerStatus = "maintenance"
-	ServerStatusError        ServerStatus = "error"
+	ServerStatusError       ServerStatus = "error"
 )
 
 type ServerOS string
@@ -30,30 +30,65 @@ const (
 	ServerOSMacOS      ServerOS = "macos"
 )
 
+type ServerEnvironment string
+
+const (
+	ServerEnvironmentProduction  ServerEnvironment = "production"
+	ServerEnvironmentStaging     ServerEnvironment = "staging"
+	ServerEnvironmentDevelopment ServerEnvironment = "development"
+)
+
+type ServerConnectionMode string
+
+const (
+	ServerConnectionModeAgent  ServerConnectionMode = "agent"
+	ServerConnectionModeSSH    ServerConnectionMode = "ssh"
+	ServerConnectionModeHybrid ServerConnectionMode = "hybrid"
+)
+
+type ServerOnboardingStatus string
+
+const (
+	ServerOnboardingStatusPending   ServerOnboardingStatus = "pending"
+	ServerOnboardingStatusReady     ServerOnboardingStatus = "ready"
+	ServerOnboardingStatusInstalled ServerOnboardingStatus = "installed"
+	ServerOnboardingStatusFailed    ServerOnboardingStatus = "failed"
+)
+
 // Server is the Aggregate Root for the Server domain.
 type Server struct {
-	ID         string       `json:"id" db:"id"`
-	TenantID   string       `json:"tenant_id" db:"tenant_id"`
-	Name       string       `json:"name" db:"name"`
-	IPAddress  string       `json:"ip_address" db:"ip_address"`
-	OS         ServerOS     `json:"os" db:"os"`
-	Status     ServerStatus `json:"status" db:"status"`
-	Location   string       `json:"location" db:"location"`
-	Provider   string       `json:"provider" db:"provider"`
-	CPUCores   int          `json:"cpu_cores" db:"cpu_cores"`
-	MemoryGB   float64      `json:"memory_gb" db:"memory_gb"`
-	DiskGB     int          `json:"disk_gb" db:"disk_gb"`
+	ID               string                 `json:"id" gorm:"column:id;primaryKey" db:"id"`
+	TenantID         string                 `json:"tenant_id" gorm:"column:tenant_id" db:"tenant_id"`
+	Name             string                 `json:"name" gorm:"column:name" db:"name"`
+	Description      string                 `json:"description" gorm:"column:description" db:"description"`
+	Hostname         string                 `json:"hostname" gorm:"column:hostname" db:"hostname"`
+	IPAddress        string                 `json:"ip_address" gorm:"column:ip_address" db:"ip_address"`
+	OS               ServerOS               `json:"os" gorm:"column:os" db:"os"`
+	OSVersion        string                 `json:"os_version" gorm:"column:os_version" db:"os_version"`
+	Status           ServerStatus           `json:"status" gorm:"column:status" db:"status"`
+	Environment      ServerEnvironment      `json:"environment" gorm:"column:environment" db:"environment"`
+	ConnectionMode   ServerConnectionMode   `json:"connection_mode" gorm:"column:connection_mode" db:"connection_mode"`
+	OnboardingStatus ServerOnboardingStatus `json:"onboarding_status" gorm:"column:onboarding_status" db:"onboarding_status"`
+	Location         string                 `json:"location" gorm:"column:location" db:"location"`
+	Provider         string                 `json:"provider" gorm:"column:provider" db:"provider"`
+	CPUCores         int                    `json:"cpu_cores" gorm:"column:cpu_cores" db:"cpu_cores"`
+	MemoryGB         float64                `json:"memory_gb" gorm:"column:memory_gb" db:"memory_gb"`
+	DiskGB           int                    `json:"disk_gb" gorm:"column:disk_gb" db:"disk_gb"`
 
 	// SSH Configuration
-	SSHPort     int    `json:"ssh_port" db:"ssh_port"`
-	SSHUser     string `json:"ssh_user" db:"ssh_user"`
-	SSHPassword string `json:"ssh_password" db:"ssh_password"` // Should be encrypted in DB
-	SSHKeyPath  string `json:"ssh_key_path" db:"ssh_key_path"`
+	SSHPort     int    `json:"ssh_port" gorm:"column:ssh_port" db:"ssh_port"`
+	SSHUser     string `json:"ssh_user" gorm:"column:ssh_user" db:"ssh_user"`
+	SSHPassword string `json:"ssh_password,omitempty" gorm:"column:ssh_password" db:"ssh_password"`
+	SSHKeyPath  string `json:"ssh_key_path,omitempty" gorm:"column:ssh_key_path" db:"ssh_key_path"`
 
-	Tags      []string  `json:"tags" db:"tags"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	Tags         []string   `json:"tags" gorm:"serializer:json;column:tags" db:"tags"`
+	LastCheckAt  *time.Time `json:"last_check_at,omitempty" gorm:"column:last_check_at" db:"last_check_at"`
+	AgentVersion string     `json:"agent_version,omitempty" gorm:"column:agent_version" db:"agent_version"`
+	CreatedAt    time.Time  `json:"created_at" gorm:"column:created_at" db:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at" gorm:"column:updated_at" db:"updated_at"`
 }
+
+func (Server) TableName() string { return "servers" }
 
 type ServerFilter struct {
 	Status   ServerStatus `json:"status"`
@@ -96,24 +131,26 @@ const (
 )
 
 type ServerBackup struct {
-	ID           string       `json:"id" db:"id"`
-	ServerID     string       `json:"server_id" db:"server_id"`
-	Name         string       `json:"name" db:"name"`
-	Description  string       `json:"description" db:"description"`
-	Type         BackupType   `json:"type" db:"type"`
-	Status       BackupStatus `json:"status" db:"status"`
-	SizeBytes    int64        `json:"size_bytes" db:"size_bytes"`
-	SizeGB       float64      `json:"size_gb" db:"-"`
-	BackupPath   string       `json:"backup_path" db:"backup_path"`
-	Compressed   bool         `json:"compressed" db:"compressed"`
-	Encrypted    bool         `json:"encrypted" db:"encrypted"`
-	ErrorMessage string       `json:"error_message" db:"error_message"`
-	StartedAt    *time.Time   `json:"started_at" db:"started_at"`
-	CompletedAt  *time.Time   `json:"completed_at" db:"completed_at"`
-	ExpiresAt    *time.Time   `json:"expires_at" db:"expires_at"`
-	CreatedAt    time.Time    `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time    `json:"updated_at" db:"updated_at"`
+	ID           string       `json:"id" gorm:"column:id;primaryKey" db:"id"`
+	ServerID     string       `json:"server_id" gorm:"column:server_id;index" db:"server_id"`
+	Name         string       `json:"name" gorm:"column:name" db:"name"`
+	Description  string       `json:"description" gorm:"column:description" db:"description"`
+	Type         BackupType   `json:"type" gorm:"column:type" db:"type"`
+	Status       BackupStatus `json:"status" gorm:"column:status" db:"status"`
+	SizeBytes    int64        `json:"size_bytes" gorm:"column:size_bytes" db:"size_bytes"`
+	SizeGB       float64      `json:"size_gb" gorm:"-" db:"-"`
+	BackupPath   string       `json:"backup_path" gorm:"column:backup_path" db:"backup_path"`
+	Compressed   bool         `json:"compressed" gorm:"column:compressed" db:"compressed"`
+	Encrypted    bool         `json:"encrypted" gorm:"column:encrypted" db:"encrypted"`
+	ErrorMessage string       `json:"error_message" gorm:"column:error_message" db:"error_message"`
+	StartedAt    *time.Time   `json:"started_at" gorm:"column:started_at" db:"started_at"`
+	CompletedAt  *time.Time   `json:"completed_at" gorm:"column:completed_at" db:"completed_at"`
+	ExpiresAt    *time.Time   `json:"expires_at" gorm:"column:expires_at" db:"expires_at"`
+	CreatedAt    time.Time    `json:"created_at" gorm:"column:created_at" db:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at" gorm:"column:updated_at" db:"updated_at"`
 }
+
+func (ServerBackup) TableName() string { return "server_backups" }
 
 type BackupFilter struct {
 	ServerID string `json:"server_id"`
@@ -144,21 +181,23 @@ const (
 )
 
 type ServerService struct {
-	ID            string        `json:"id" db:"id"`
-	ServerID      string        `json:"server_id" db:"server_id"`
-	Name          string        `json:"name" db:"name"`
-	DisplayName   string        `json:"display_name" db:"display_name"`
-	Description   string        `json:"description" db:"description"`
-	Status        ServiceStatus `json:"status" db:"status"`
-	Enabled       bool          `json:"enabled" db:"enabled"`
-	PID           int           `json:"pid" db:"pid"`
-	Port          int           `json:"port" db:"port"`
-	ConfigPath    string        `json:"config_path" db:"config_path"`
-	LogPath       string        `json:"log_path" db:"log_path"`
-	LastCheckedAt time.Time     `json:"last_checked_at" db:"last_checked_at"`
-	CreatedAt     time.Time     `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time     `json:"updated_at" db:"updated_at"`
+	ID            string        `json:"id" gorm:"column:id;primaryKey" db:"id"`
+	ServerID      string        `json:"server_id" gorm:"column:server_id;index" db:"server_id"`
+	Name          string        `json:"name" gorm:"column:name" db:"name"`
+	DisplayName   string        `json:"display_name" gorm:"column:display_name" db:"display_name"`
+	Description   string        `json:"description" gorm:"column:description" db:"description"`
+	Status        ServiceStatus `json:"status" gorm:"column:status" db:"status"`
+	Enabled       bool          `json:"enabled" gorm:"column:enabled" db:"enabled"`
+	PID           int           `json:"pid" gorm:"column:pid" db:"pid"`
+	Port          int           `json:"port" gorm:"column:port" db:"port"`
+	ConfigPath    string        `json:"config_path" gorm:"column:config_path" db:"config_path"`
+	LogPath       string        `json:"log_path" gorm:"column:log_path" db:"log_path"`
+	LastCheckedAt time.Time     `json:"last_checked_at" gorm:"column:last_checked_at" db:"last_checked_at"`
+	CreatedAt     time.Time     `json:"created_at" gorm:"column:created_at" db:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at" gorm:"column:updated_at" db:"updated_at"`
 }
+
+func (ServerService) TableName() string { return "server_services" }
 
 type ServiceFilter struct {
 	ServerID string `json:"server_id"`
@@ -246,56 +285,66 @@ const (
 )
 
 type ServerIPTable struct {
-	ID          string          `json:"id" db:"id"`
-	ServerID    string          `json:"server_id" db:"server_id"`
-	Name        string          `json:"name" db:"name"`
-	Description string          `json:"description" db:"description"`
-	Enabled     bool            `json:"enabled" db:"enabled"`
-	Chain       IPTableChain    `json:"chain" db:"chain"`
-	Action      IPTableAction   `json:"action" db:"action"`
-	Protocol    IPTableProtocol `json:"protocol" db:"protocol"`
-	SourceIP    string          `json:"source_ip" db:"source_ip"`
-	SourcePort  string          `json:"source_port" db:"source_port"`
-	DestIP      string          `json:"dest_ip" db:"dest_ip"`
-	DestPort    string          `json:"dest_port" db:"dest_port"`
-	Interface   string          `json:"interface" db:"interface"`
-	State       string          `json:"state" db:"state"`
-	Position    int             `json:"position" db:"position"`
-	RawRule     string          `json:"raw_rule" db:"raw_rule"`
-	Comment     string          `json:"comment" db:"comment"`
-	PacketCount int64           `json:"packet_count" db:"packet_count"`
-	ByteCount   int64           `json:"byte_count" db:"byte_count"`
-	LastApplied time.Time       `json:"last_applied" db:"last_applied"`
+	ID          string          `json:"id" gorm:"column:id;primaryKey" db:"id"`
+	ServerID    string          `json:"server_id" gorm:"column:server_id;index" db:"server_id"`
+	Name        string          `json:"name" gorm:"column:name" db:"name"`
+	Description string          `json:"description" gorm:"column:description" db:"description"`
+	Enabled     bool            `json:"enabled" gorm:"column:enabled" db:"enabled"`
+	Chain       IPTableChain    `json:"chain" gorm:"column:chain" db:"chain"`
+	Action      IPTableAction   `json:"action" gorm:"column:action" db:"action"`
+	Protocol    IPTableProtocol `json:"protocol" gorm:"column:protocol" db:"protocol"`
+	SourceIP    string          `json:"source_ip" gorm:"column:source_ip" db:"source_ip"`
+	SourcePort  string          `json:"source_port" gorm:"column:source_port" db:"source_port"`
+	DestIP      string          `json:"dest_ip" gorm:"column:dest_ip" db:"dest_ip"`
+	DestPort    string          `json:"dest_port" gorm:"column:dest_port" db:"dest_port"`
+	Interface   string          `json:"interface" gorm:"column:interface" db:"interface"`
+	State       string          `json:"state" gorm:"column:state" db:"state"`
+	Position    int             `json:"position" gorm:"column:position" db:"position"`
+	RawRule     string          `json:"raw_rule" gorm:"column:raw_rule" db:"raw_rule"`
+	Comment     string          `json:"comment" gorm:"column:comment" db:"comment"`
+	PacketCount int64           `json:"packet_count" gorm:"column:packet_count" db:"packet_count"`
+	ByteCount   int64           `json:"byte_count" gorm:"column:byte_count" db:"byte_count"`
+	LastApplied time.Time       `json:"last_applied" gorm:"column:last_applied" db:"last_applied"`
+	CreatedAt   time.Time       `json:"created_at" gorm:"column:created_at" db:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at" gorm:"column:updated_at" db:"updated_at"`
 }
 
+func (ServerIPTable) TableName() string { return "server_iptables" }
+
 type IPTableBackup struct {
-	ID          string    `json:"id" db:"id"`
-	ServerID    string    `json:"server_id" db:"server_id"`
-	Name        string    `json:"name" db:"name"`
-	Description string    `json:"description" db:"description"`
-	Content     string    `json:"content" db:"content"`
-	RuleCount   int       `json:"rule_count" db:"rule_count"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	ID          string    `json:"id" gorm:"column:id;primaryKey" db:"id"`
+	ServerID    string    `json:"server_id" gorm:"column:server_id;index" db:"server_id"`
+	Name        string    `json:"name" gorm:"column:name" db:"name"`
+	Description string    `json:"description" gorm:"column:description" db:"description"`
+	Content     string    `json:"content" gorm:"column:content" db:"content"`
+	RuleCount   int       `json:"rule_count" gorm:"column:rule_count" db:"rule_count"`
+	CreatedAt   time.Time `json:"created_at" gorm:"column:created_at" db:"created_at"`
 }
+
+func (IPTableBackup) TableName() string { return "iptable_backups" }
 
 // --- Network ---
 
 type NetworkInterface struct {
-	ID             string    `json:"id" db:"id"`
-	ServerID       string    `json:"server_id" db:"server_id"`
-	Name           string    `json:"name" db:"name"`
-	Type           string    `json:"type" db:"type"`
-	IPAddress      string    `json:"ip_address" db:"ip_address"`
-	MACAddress     string    `json:"mac_address" db:"mac_address"`
-	Netmask        string    `json:"netmask" db:"netmask"`
-	Gateway        string    `json:"gateway" db:"gateway"`
-	MTU            int       `json:"mtu" db:"mtu"`
-	Speed          int       `json:"speed" db:"speed"`
-	IsUp           bool      `json:"is_up" db:"is_up"`
-	BytesReceived  int64     `json:"bytes_received" db:"bytes_received"`
-	BytesSent      int64     `json:"bytes_sent" db:"bytes_sent"`
-	LastUpdatedAt  time.Time `json:"last_updated_at" db:"last_updated_at"`
+	ID            string    `json:"id" gorm:"column:id;primaryKey" db:"id"`
+	ServerID      string    `json:"server_id" gorm:"column:server_id;index" db:"server_id"`
+	Name          string    `json:"name" gorm:"column:name" db:"name"`
+	Type          string    `json:"type" gorm:"column:type" db:"type"`
+	IPAddress     string    `json:"ip_address" gorm:"column:ip_address" db:"ip_address"`
+	MACAddress    string    `json:"mac_address" gorm:"column:mac_address" db:"mac_address"`
+	Netmask       string    `json:"netmask" gorm:"column:netmask" db:"netmask"`
+	Gateway       string    `json:"gateway" gorm:"column:gateway" db:"gateway"`
+	MTU           int       `json:"mtu" gorm:"column:mtu" db:"mtu"`
+	Speed         int       `json:"speed" gorm:"column:speed" db:"speed"`
+	IsUp          bool      `json:"is_up" gorm:"column:is_up" db:"is_up"`
+	BytesReceived int64     `json:"bytes_received" gorm:"column:bytes_received" db:"bytes_received"`
+	BytesSent     int64     `json:"bytes_sent" gorm:"column:bytes_sent" db:"bytes_sent"`
+	LastUpdatedAt time.Time `json:"last_updated_at" gorm:"column:last_updated_at" db:"last_updated_at"`
+	CreatedAt     time.Time `json:"created_at" gorm:"column:created_at" db:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at" gorm:"column:updated_at" db:"updated_at"`
 }
+
+func (NetworkInterface) TableName() string { return "network_interfaces" }
 
 type NetworkStats struct {
 	ServerID      string    `json:"server_id"`
@@ -308,16 +357,19 @@ type NetworkStats struct {
 }
 
 type NetworkConnectivityCheck struct {
-	ID           string    `json:"id" db:"id"`
-	ServerID     string    `json:"server_id" db:"server_id"`
-	TargetHost   string    `json:"target_host" db:"target_host"`
-	TargetPort   int       `json:"target_port" db:"target_port"`
-	Protocol     string    `json:"protocol" db:"protocol"`
-	Success      bool      `json:"success" db:"success"`
-	Latency      float64   `json:"latency" db:"latency"` // ms
-	ErrorMessage string    `json:"error_message" db:"error_message"`
-	TestedAt     time.Time `json:"tested_at" db:"tested_at"`
+	ID           string    `json:"id" gorm:"column:id;primaryKey" db:"id"`
+	ServerID     string    `json:"server_id" gorm:"column:server_id;index" db:"server_id"`
+	TargetHost   string    `json:"target_host" gorm:"column:target_host" db:"target_host"`
+	TargetPort   int       `json:"target_port" gorm:"column:target_port" db:"target_port"`
+	Protocol     string    `json:"protocol" gorm:"column:protocol" db:"protocol"`
+	Success      bool      `json:"success" gorm:"column:success" db:"success"`
+	Latency      float64   `json:"latency" gorm:"column:latency" db:"latency"` // ms
+	ErrorMessage string    `json:"error_message" gorm:"column:error_message" db:"error_message"`
+	TestedAt     time.Time `json:"tested_at" gorm:"column:tested_at" db:"tested_at"`
+	CreatedAt    time.Time `json:"created_at" gorm:"column:created_at" db:"created_at"`
 }
+
+func (NetworkConnectivityCheck) TableName() string { return "network_connectivity_checks" }
 
 type PortCheckRequest struct {
 	Host     string `json:"host"`
@@ -471,5 +523,7 @@ type ServerNetworkRepository interface {
 	UpdateInterface(ctx context.Context, iface *NetworkInterface) error
 	DeleteInterfacesByServerID(ctx context.Context, serverID string) error
 	CreateConnectivityCheck(ctx context.Context, check *NetworkConnectivityCheck) error
+	GetConnectivityCheckByID(ctx context.Context, id string) (*NetworkConnectivityCheck, error)
+	UpdateConnectivityCheck(ctx context.Context, check *NetworkConnectivityCheck) error
 	GetConnectivityHistory(ctx context.Context, serverID string, limit int) ([]*NetworkConnectivityCheck, error)
 }

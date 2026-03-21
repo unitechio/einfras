@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"einfra/api/internal/modules/agent/domain"
 	agentregistry "einfra/api/internal/modules/agent/application"
+	"einfra/api/internal/modules/agent/domain"
 	agentpb "einfra/api/internal/modules/agent/infrastructure/grpcpb"
 )
 
@@ -161,11 +161,13 @@ func (s *Server) handleEvent(ctx context.Context, serverID string, event *agentp
 	case *agentpb.AgentEvent_Register:
 		reg := p.Register
 		info := &agent.AgentInfo{
-			ServerID: serverID,
-			Online:   true,
-			LastSeen: time.Now(),
-			OS:       reg.Os,
-			Arch:     reg.Arch,
+			ServerID:     serverID,
+			Online:       true,
+			LastSeen:     time.Now(),
+			OS:           reg.Os,
+			Arch:         reg.Arch,
+			Version:      reg.AgentVersion,
+			Capabilities: reg.Capabilities,
 		}
 		_ = s.agentRepo.Upsert(serverID, info)
 		s.hub.BroadcastToClients(serverID, map[string]any{

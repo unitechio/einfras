@@ -34,7 +34,7 @@ func NewAgentTokenHandler(issuer TokenIssuer) *AgentTokenHandler {
 func (h *AgentTokenHandler) IssueToken(w http.ResponseWriter, r *http.Request) {
 	serverID := mux.Vars(r)["id"]
 	if serverID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "server id required"})
+		writeError(w, http.StatusBadRequest, "agent_token", "agent_token.issue", "validation_failed", "server id required", nil)
 		return
 	}
 
@@ -44,7 +44,7 @@ func (h *AgentTokenHandler) IssueToken(w http.ResponseWriter, r *http.Request) {
 			Str("server_id", serverID).
 			Err(err).
 			Msg("[token] failed to issue agent token")
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token issuance failed"})
+		writeError(w, http.StatusInternalServerError, "agent_token", "agent_token.issue", "issue_failed", "token issuance failed", map[string]any{"server_id": serverID})
 		return
 	}
 
@@ -52,9 +52,9 @@ func (h *AgentTokenHandler) IssueToken(w http.ResponseWriter, r *http.Request) {
 		Str("server_id", serverID).
 		Msg("[token] agent token issued (rotation)")
 
-	writeJSON(w, http.StatusCreated, map[string]string{
+	writeJSON(w, http.StatusCreated, itemEnvelope("created", "agent_token", map[string]string{
 		"server_id": serverID,
 		"token":     rawToken,
 		"note":      "Store this token securely — it will not be shown again",
-	})
+	}, nil))
 }

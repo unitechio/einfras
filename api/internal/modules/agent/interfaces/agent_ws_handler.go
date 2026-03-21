@@ -11,8 +11,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
 
-	"einfra/api/internal/modules/agent/domain"
 	agentregistry "einfra/api/internal/modules/agent/application"
+	"einfra/api/internal/modules/agent/domain"
 )
 
 var upgrader = websocket.Upgrader{
@@ -32,12 +32,17 @@ type AgentTokenValidator interface {
 	ValidateFromHeader(ctx context.Context, serverID, authHeader string) error
 }
 
+type HeartbeatObserver interface {
+	RecordHeartbeat(serverID string, payload map[string]any) error
+}
+
 // AgentWSHandler handles the WebSocket lifecycle for a connecting agent.
 type AgentWSHandler struct {
 	hub        *agentregistry.Hub
 	dispatcher *agentregistry.Dispatcher
 	agentRepo  AgentRepository
 	tokenSvc   AgentTokenValidator // nil = auth disabled (dev mode only)
+	observer   HeartbeatObserver
 }
 
 // NewAgentWSHandler creates a new handler.
@@ -47,12 +52,14 @@ func NewAgentWSHandler(
 	dispatcher *agentregistry.Dispatcher,
 	agentRepo AgentRepository,
 	tokenSvc AgentTokenValidator,
+	observer HeartbeatObserver,
 ) *AgentWSHandler {
 	return &AgentWSHandler{
-		hub:       hub,
+		hub:        hub,
 		dispatcher: dispatcher,
-		agentRepo: agentRepo,
-		tokenSvc:  tokenSvc,
+		agentRepo:  agentRepo,
+		tokenSvc:   tokenSvc,
+		observer:   observer,
 	}
 }
 
@@ -61,7 +68,7 @@ func NewAgentWSHandler(
 func (h *AgentWSHandler) HandleAgentWS(w http.ResponseWriter, r *http.Request) {
 	serverID := mux.Vars(r)["server_id"]
 	if serverID == "" {
-		http.Error(w, "server_id required", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "agent_ws", "agent_ws.connect", "validation_failed", "server_id required", nil)
 		return
 	}
 
@@ -74,7 +81,7 @@ func (h *AgentWSHandler) HandleAgentWS(w http.ResponseWriter, r *http.Request) {
 				Str("remote", r.RemoteAddr).
 				Err(err).
 				Msg("[agent-ws] unauthorized connection attempt")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeError(w, http.StatusUnauthorized, "agent_ws", "agent_ws.connect", "unauthorized", "unauthorized", map[string]any{"server_id": serverID})
 			return
 		}
 	}
@@ -192,6 +199,9 @@ func (h *AgentWSHandler) handleHeartbeat(serverID string, msg agent.AgentMessage
 	}
 
 	_ = h.agentRepo.Upsert(serverID, info)
+	if h.observer != nil {
+		_ = h.observer.RecordHeartbeat(serverID, payload)
+	}
 
 	// Broadcast metrics to frontend clients
 	h.hub.BroadcastToClients(serverID, map[string]any{

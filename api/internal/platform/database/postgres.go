@@ -9,10 +9,10 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"einfra/api/internal/shared/platform/config"
 	"einfra/api/internal/domain"
 	domentagent "einfra/api/internal/modules/agent/domain"
 	serverdomain "einfra/api/internal/modules/server/domain"
+	"einfra/api/internal/shared/platform/config"
 )
 
 func NewPostgresConnection(cfg config.DatabaseConfig) (*gorm.DB, error) {
@@ -22,6 +22,7 @@ func NewPostgresConnection(cfg config.DatabaseConfig) (*gorm.DB, error) {
 		cfg.Port,
 		cfg.User,
 		cfg.Password,
+		cfg.Database,
 		cfg.SSLMode,
 	)
 

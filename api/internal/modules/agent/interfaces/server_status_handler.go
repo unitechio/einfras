@@ -7,8 +7,8 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"einfra/api/internal/modules/agent/domain"
 	agentregistry "einfra/api/internal/modules/agent/application"
+	"einfra/api/internal/modules/agent/domain"
 )
 
 // AgentStatusHandler returns the live connection state of a server's agent.
@@ -33,7 +33,7 @@ func NewAgentStatusHandler(hub *agentregistry.Hub, agentRepo AgentInfoReader) *A
 func (h *AgentStatusHandler) GetAgentStatus(w http.ResponseWriter, r *http.Request) {
 	serverID := mux.Vars(r)["id"]
 	if serverID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "server id required"})
+		writeError(w, http.StatusBadRequest, "agent_status", "agent_status.get", "validation_failed", "server id required", nil)
 		return
 	}
 
@@ -44,24 +44,21 @@ func (h *AgentStatusHandler) GetAgentStatus(w http.ResponseWriter, r *http.Reque
 	info, err := h.agentRepo.GetByServerID(serverID)
 	if err != nil {
 		// Agent has never connected — return minimal response
-		writeJSON(w, http.StatusOK, map[string]any{
+		writeJSON(w, http.StatusOK, itemEnvelope("ok", "agent_status", map[string]any{
 			"server_id": serverID,
 			"online":    liveOnline,
-		})
+		}, nil))
 		return
 	}
 
 	// Override online flag with live state
 	info.Online = liveOnline
-	writeJSON(w, http.StatusOK, info)
+	writeJSON(w, http.StatusOK, itemEnvelope("ok", "agent_status", info, nil))
 }
 
 // ListOnlineServers handles: GET /v1/agents/online
 // Returns the list of server IDs that have active agent connections.
 func (h *AgentStatusHandler) ListOnlineServers(w http.ResponseWriter, r *http.Request) {
 	ids := h.hub.OnlineServerIDs()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"online_server_ids": ids,
-		"count":             len(ids),
-	})
+	writeJSON(w, http.StatusOK, listEnvelope("ok", "agent_online_server", ids, map[string]any{"count": len(ids)}))
 }

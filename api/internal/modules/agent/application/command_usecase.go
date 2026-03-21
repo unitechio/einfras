@@ -2,23 +2,24 @@ package agentregistry
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
-	"einfra/api/internal/modules/agent/domain"
+	agent "einfra/api/internal/modules/agent/domain"
 	"einfra/api/internal/shared/events"
 )
 
-// CommandRepository is the persistence interface for commands and their logs.
 type CommandRepository interface {
 	Create(ctx context.Context, cmd *agent.Command) error
 	UpdateStatus(ctx context.Context, id string, status agent.CommandStatus, exitCode *int) error
 	AppendLog(ctx context.Context, log *agent.CommandLog) error
 	FindByID(ctx context.Context, id string) (*agent.Command, error)
 	ListByServer(ctx context.Context, serverID string, limit int) ([]*agent.Command, error)
+	GetLogs(ctx context.Context, commandID string) ([]*agent.CommandLog, error)
 }
 
 // MetricsRecorder is a narrow interface so we can inject monitoring.Metrics without import cycle.
@@ -33,12 +34,17 @@ type EventPublisher interface {
 	CommandFailed(e events.CommandFailedEvent)
 }
 
+type ResultProjector interface {
+	Project(ctx context.Context, commandID string) error
+}
+
 // Dispatcher sends commands to agents and manages their lifecycle.
 type Dispatcher struct {
 	hub       *Hub
 	repo      CommandRepository
 	metrics   MetricsRecorder
 	publisher EventPublisher
+	projector ResultProjector
 }
 
 // NewDispatcher creates a new command dispatcher.
@@ -52,10 +58,54 @@ func (d *Dispatcher) WithPublisher(p EventPublisher) *Dispatcher {
 	return d
 }
 
+func (d *Dispatcher) WithProjector(projector ResultProjector) *Dispatcher {
+	d.projector = projector
+	return d
+}
+
 // Dispatch sends a command to the agent for the given server and records it in the DB.
 // It returns the created Command (in RUNNING state) or an error if the agent is offline.
 // idempotencyKey: optional caller-supplied key; if empty, a UUID is generated.
 func (d *Dispatcher) Dispatch(ctx context.Context, serverID, userID, cmd string, timeoutSec int, idempotencyKey string) (*agent.Command, error) {
+	return d.dispatch(ctx, serverID, userID, agent.CommandTypeShell, cmd, "", map[string]any{
+		"type":       "EXEC_COMMAND",
+		"message_id": "",
+		"payload": map[string]any{
+			"command_id":      "",
+			"cmd":             cmd,
+			"timeout_s":       timeoutSec,
+			"idempotency_key": idempotencyKey,
+		},
+	}, timeoutSec, idempotencyKey)
+}
+
+func (d *Dispatcher) DispatchOperation(ctx context.Context, serverID, userID, operation string, params map[string]any, timeoutSec int, idempotencyKey string) (*agent.Command, error) {
+	payloadJSON := ""
+	payload := agent.ControlOperationPayload{
+		Operation: operation,
+		TimeoutS:  timeoutSec,
+		Params:    params,
+	}
+	if len(params) > 0 || operation != "" {
+		if b, err := json.Marshal(payload); err == nil {
+			payloadJSON = string(b)
+		}
+	}
+	return d.dispatch(ctx, serverID, userID, agent.CommandTypeControlOperation, operation, payloadJSON, map[string]any{
+		"type":            "CONTROL_OPERATION",
+		"message_id":      "",
+		"idempotency_key": idempotencyKey,
+		"payload": map[string]any{
+			"command_id":      "",
+			"operation":       operation,
+			"params":          params,
+			"timeout_s":       timeoutSec,
+			"idempotency_key": idempotencyKey,
+		},
+	}, timeoutSec, idempotencyKey)
+}
+
+func (d *Dispatcher) dispatch(ctx context.Context, serverID, userID string, commandType agent.CommandType, cmd, payloadJSON string, message map[string]any, timeoutSec int, idempotencyKey string) (*agent.Command, error) {
 	_, ok := d.hub.GetAgent(serverID)
 	if !ok && !d.hub.IsGRPCOnline(serverID) {
 		if d.metrics != nil {
@@ -81,7 +131,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, serverID, userID, cmd string,
 		ServerID:       serverID,
 		UserID:         userID,
 		IdempotencyKey: ikey,
+		Type:           commandType,
 		Cmd:            cmd,
+		PayloadJSON:    payloadJSON,
 		Status:         agent.StatusPending,
 		TimeoutSec:     timeoutSec,
 		CreatedAt:      time.Now(),
@@ -90,16 +142,14 @@ func (d *Dispatcher) Dispatch(ctx context.Context, serverID, userID, cmd string,
 		return nil, fmt.Errorf("persist command: %w", err)
 	}
 
-	if err := d.hub.SendToAgent(serverID, map[string]any{
-		"type":       "EXEC_COMMAND",
-		"message_id": command.ID,
-		"payload": map[string]any{
-			"command_id":      command.ID,
-			"cmd":             cmd,
-			"timeout_s":       timeoutSec,
-			"idempotency_key": ikey,
-		},
-	}); err != nil {
+	message["message_id"] = command.ID
+	if payload, ok := message["payload"].(map[string]any); ok {
+		payload["command_id"] = command.ID
+		payload["idempotency_key"] = ikey
+	}
+	message["idempotency_key"] = ikey
+
+	if err := d.hub.SendToAgent(serverID, message); err != nil {
 		_ = d.repo.UpdateStatus(ctx, command.ID, agent.StatusFailed, nil)
 		if d.metrics != nil {
 			d.metrics.IncCommandFailed(serverID, "send_error")
@@ -186,6 +236,7 @@ func (d *Dispatcher) HandleAgentMessage(serverID string, msg agent.AgentMessage)
 				exitCode = int(ec)
 			}
 			_ = d.repo.UpdateStatus(ctx, commandID, agent.StatusSuccess, &exitCode)
+			d.projectResult(ctx, commandID)
 		}
 
 	case "COMMAND_ERROR":
@@ -196,11 +247,24 @@ func (d *Dispatcher) HandleAgentMessage(serverID string, msg agent.AgentMessage)
 				exitCode = int(ec)
 			}
 			_ = d.repo.UpdateStatus(ctx, commandID, agent.StatusFailed, &exitCode)
+			d.projectResult(ctx, commandID)
 		}
 	}
 
 	// Always broadcast to watching frontend clients
 	d.hub.BroadcastToClients(serverID, msg)
+}
+
+func (d *Dispatcher) projectResult(ctx context.Context, commandID string) {
+	if d.projector == nil || commandID == "" {
+		return
+	}
+	if err := d.projector.Project(ctx, commandID); err != nil {
+		log.Warn().
+			Str("command_id", commandID).
+			Err(err).
+			Msg("[dispatcher] project command result")
+	}
 }
 
 // ── MetricsRecorder no-op helpers (used when metrics is nil) ─────────────────
