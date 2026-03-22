@@ -15,6 +15,9 @@ type SystemMetrics struct {
 	CPUPercent  float64 `json:"cpu_percent"`
 	MemPercent  float64 `json:"mem_percent"`
 	DiskPercent float64 `json:"disk_percent"`
+	CPUCores    int     `json:"cpu_cores"`
+	MemoryGB    float64 `json:"memory_gb"`
+	DiskGB      int     `json:"disk_gb"`
 	OS          string  `json:"os"`
 	Arch        string  `json:"arch"`
 	HasDocker   bool    `json:"has_docker"`
@@ -26,6 +29,9 @@ func Collect() SystemMetrics {
 		CPUPercent:  getCPUPercent(),
 		MemPercent:  getMemPercent(),
 		DiskPercent: getDiskPercent(),
+		CPUCores:    runtime.NumCPU(),
+		MemoryGB:    getMemoryTotalGB(),
+		DiskGB:      getDiskTotalGB(),
 		OS:          runtime.GOOS,
 		Arch:        runtime.GOARCH,
 		HasDocker:   commandExists("docker"),
@@ -124,6 +130,27 @@ func getMemPercent() float64 {
 	return float64(used) / float64(total) * 100
 }
 
+func getMemoryTotalGB() float64 {
+	if runtime.GOOS != "linux" {
+		return 0
+	}
+	f, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 2 || fields[0] != "MemTotal:" {
+			continue
+		}
+		totalKB, _ := strconv.ParseFloat(fields[1], 64)
+		return totalKB / 1024 / 1024
+	}
+	return 0
+}
+
 // getDiskPercent returns disk usage of the root filesystem.
 func getDiskPercent() float64 {
 	out, err := exec.Command("df", "-P", "/").Output()
@@ -141,6 +168,23 @@ func getDiskPercent() float64 {
 	pct := strings.TrimSuffix(fields[4], "%")
 	val, _ := strconv.ParseFloat(pct, 64)
 	return val
+}
+
+func getDiskTotalGB() int {
+	out, err := exec.Command("df", "-Pk", "/").Output()
+	if err != nil {
+		return 0
+	}
+	lines := strings.Split(string(out), "\n")
+	if len(lines) < 2 {
+		return 0
+	}
+	fields := strings.Fields(lines[1])
+	if len(fields) < 2 {
+		return 0
+	}
+	totalKB, _ := strconv.ParseFloat(fields[1], 64)
+	return int(totalKB / 1024 / 1024)
 }
 
 // DockerSummary holds basic Docker runtime info.

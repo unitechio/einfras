@@ -26,6 +26,7 @@ import (
 var (
 	packageNamePattern = regexp.MustCompile(`^[a-zA-Z0-9.+:_-]+$`)
 	userNamePattern    = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+	groupNamePattern   = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 )
 
 type ControlExecutor struct {
@@ -34,6 +35,12 @@ type ControlExecutor struct {
 	pluginRoot        string
 	maxReadBytes      int64
 	maxTailLines      int
+	tenantID          string
+	tenantAllowlist   map[string]struct{}
+	tenantDenylist    map[string]struct{}
+	groupAllowlist    map[string]struct{}
+	groupDenylist     map[string]struct{}
+	groupRoleMatrix   map[string]map[string]map[string]struct{}
 }
 
 func NewControlExecutor(cfg *config.Config) *ControlExecutor {
@@ -43,6 +50,12 @@ func NewControlExecutor(cfg *config.Config) *ControlExecutor {
 		pluginRoot:        filepath.Clean(cfg.PluginRoot),
 		maxReadBytes:      cfg.MaxReadBytes,
 		maxTailLines:      cfg.MaxTailLines,
+		tenantID:          strings.ToLower(strings.TrimSpace(cfg.TenantID)),
+		tenantAllowlist:   cfg.TenantAllowlist,
+		tenantDenylist:    cfg.TenantDenylist,
+		groupAllowlist:    cfg.GroupAllowlist,
+		groupDenylist:     cfg.GroupDenylist,
+		groupRoleMatrix:   cfg.GroupOperationRoles,
 	}
 }
 
@@ -61,10 +74,24 @@ func (e *ControlExecutor) Execute(ctx context.Context, operation string, params 
 		return e.fileChmod(params)
 	case "process.signal":
 		return e.processSignal(params)
-	case "package.install", "package.remove", "package.update":
+	case "package.list", "package.install", "package.remove", "package.update":
 		return e.packageAction(ctx, operation, params)
 	case "access.list-users":
 		return e.listUsers()
+	case "access.list-groups":
+		return e.listGroups()
+	case "access.add-user":
+		return e.addUser(ctx, params)
+	case "access.update-user":
+		return e.updateUser(ctx, params)
+	case "access.delete-user":
+		return e.deleteUser(ctx, params)
+	case "access.add-group":
+		return e.addGroup(ctx, params)
+	case "access.update-group":
+		return e.updateGroup(ctx, params)
+	case "access.delete-group":
+		return e.deleteGroup(ctx, params)
 	case "access.list-ssh-keys":
 		return e.listSSHKeys(params)
 	case "access.add-ssh-key":
@@ -88,6 +115,13 @@ func (e *ControlExecutor) Execute(ctx context.Context, operation string, params 
 	default:
 		return "", 1, fmt.Errorf("registered control operation %q has no executor implementation", operation)
 	}
+}
+
+func (e *ControlExecutor) ExecutePayload(ctx context.Context, payload agent.ControlOperationPayload) (string, int, error) {
+	if err := e.authorize(payload); err != nil {
+		return "", 1, err
+	}
+	return e.Execute(ctx, payload.Operation, payload.Params)
 }
 
 func marshalResult(result agent.TypedControlResult) (string, int, error) {
@@ -309,6 +343,9 @@ func (e *ControlExecutor) packageAction(ctx context.Context, operation string, p
 	if action == "" {
 		action = stringParam(params, "action")
 	}
+	if action == "list" {
+		return e.packageList(ctx)
+	}
 	if action == "update" && packageName == "" {
 		packageName = ""
 	}
@@ -357,6 +394,55 @@ func (e *ControlExecutor) packageAction(ctx context.Context, operation string, p
 	})
 }
 
+func (e *ControlExecutor) packageList(ctx context.Context) (string, int, error) {
+	manager := detectPackageManager()
+	if manager == nil {
+		return "", 1, errors.New("no supported package manager found")
+	}
+	cmd, err := manager.BuildListCommand(ctx)
+	if err != nil {
+		return "", 1, err
+	}
+	out, err := cmd.CombinedOutput()
+	resultText := strings.TrimSpace(string(out))
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			result, _, marshalErr := marshalResult(agent.TypedControlResult{
+				Operation: "package.list",
+				Status:    "failed",
+				Summary:   "package inventory returned non-zero exit",
+				Preview:   resultText,
+			})
+			return result, exitErr.ExitCode(), marshalErr
+		}
+		return "", 1, err
+	}
+	type packageEntry struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+		Arch    string `json:"arch"`
+	}
+	items := make([]packageEntry, 0, 200)
+	for _, line := range strings.Split(resultText, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		items = append(items, packageEntry{
+			Name:    safeSlice(parts, 0),
+			Version: safeSlice(parts, 1),
+			Arch:    firstNonEmpty(safeSlice(parts, 2), "-"),
+		})
+	}
+	return marshalResult(agent.TypedControlResult{
+		Operation: "package.list",
+		Summary:   "package inventory loaded",
+		Data:      items,
+		Preview:   resultText,
+	})
+}
+
 func (e *ControlExecutor) listUsers() (string, int, error) {
 	if runtime.GOOS != "linux" {
 		return "", 1, errors.New("list-users is only supported on linux")
@@ -390,6 +476,48 @@ func (e *ControlExecutor) listUsers() (string, int, error) {
 	return marshalResult(agent.TypedControlResult{
 		Operation: "access.list-users",
 		Summary:   "user list loaded",
+		Data:      items,
+	})
+}
+
+func (e *ControlExecutor) listGroups() (string, int, error) {
+	if runtime.GOOS != "linux" {
+		return "", 1, errors.New("list-groups is only supported on linux")
+	}
+	content, err := os.ReadFile("/etc/group")
+	if err != nil {
+		return "", 1, err
+	}
+	type groupEntry struct {
+		Name    string   `json:"name"`
+		GID     string   `json:"gid"`
+		Members []string `json:"members"`
+	}
+	items := make([]groupEntry, 0, 32)
+	scanner := bufio.NewScanner(strings.NewReader(string(content)))
+	for scanner.Scan() {
+		parts := strings.Split(scanner.Text(), ":")
+		if len(parts) < 4 {
+			continue
+		}
+		members := make([]string, 0)
+		if strings.TrimSpace(parts[3]) != "" {
+			for _, member := range strings.Split(parts[3], ",") {
+				member = strings.TrimSpace(member)
+				if member != "" {
+					members = append(members, member)
+				}
+			}
+		}
+		items = append(items, groupEntry{
+			Name:    parts[0],
+			GID:     parts[2],
+			Members: members,
+		})
+	}
+	return marshalResult(agent.TypedControlResult{
+		Operation: "access.list-groups",
+		Summary:   "group list loaded",
 		Data:      items,
 	})
 }
@@ -453,6 +581,183 @@ func (e *ControlExecutor) addSSHKey(params map[string]any) (string, int, error) 
 		Data: map[string]any{
 			"target": target,
 		},
+	})
+}
+
+func (e *ControlExecutor) addUser(ctx context.Context, params map[string]any) (string, int, error) {
+	spec, err := parseAccessMutation(params)
+	if err != nil {
+		return "", 1, err
+	}
+	if err := validateUserTarget(spec.Target); err != nil {
+		return "", 1, err
+	}
+	args := []string{"useradd", "-m"}
+	if spec.Home != "" {
+		args = append(args, "-d", spec.Home)
+	}
+	if spec.Shell != "" {
+		args = append(args, "-s", spec.Shell)
+	}
+	if len(spec.Groups) > 0 {
+		args = append(args, "-G", strings.Join(spec.Groups, ","))
+	}
+	args = append(args, spec.Target)
+	if output, exitCode, err := runPrivilegedCommand(ctx, args...); err != nil {
+		return commandFailure("access.add-user", "user creation failed", output, exitCode, err)
+	}
+	return marshalResult(agent.TypedControlResult{
+		Operation: "access.add-user",
+		Summary:   "user created",
+		Data: map[string]any{
+			"target": spec.Target,
+			"home":   spec.Home,
+			"shell":  spec.Shell,
+			"groups": spec.Groups,
+		},
+	})
+}
+
+func (e *ControlExecutor) updateUser(ctx context.Context, params map[string]any) (string, int, error) {
+	spec, err := parseAccessMutation(params)
+	if err != nil {
+		return "", 1, err
+	}
+	if err := validateUserTarget(spec.Target); err != nil {
+		return "", 1, err
+	}
+	if spec.RenameTo != "" {
+		if err := validateUserTarget(spec.RenameTo); err != nil {
+			return "", 1, err
+		}
+		if output, exitCode, err := runPrivilegedCommand(ctx, "usermod", "-l", spec.RenameTo, spec.Target); err != nil {
+			return commandFailure("access.update-user", "username update failed", output, exitCode, err)
+		}
+		spec.Target = spec.RenameTo
+	}
+	if spec.Home != "" {
+		if output, exitCode, err := runPrivilegedCommand(ctx, "usermod", "-d", spec.Home, "-m", spec.Target); err != nil {
+			return commandFailure("access.update-user", "home update failed", output, exitCode, err)
+		}
+	}
+	if spec.Shell != "" {
+		if output, exitCode, err := runPrivilegedCommand(ctx, "usermod", "-s", spec.Shell, spec.Target); err != nil {
+			return commandFailure("access.update-user", "shell update failed", output, exitCode, err)
+		}
+	}
+	if len(spec.Groups) > 0 {
+		if output, exitCode, err := runPrivilegedCommand(ctx, "usermod", "-G", strings.Join(spec.Groups, ","), spec.Target); err != nil {
+			return commandFailure("access.update-user", "group membership update failed", output, exitCode, err)
+		}
+	}
+	return marshalResult(agent.TypedControlResult{
+		Operation: "access.update-user",
+		Summary:   "user updated",
+		Data: map[string]any{
+			"target": spec.Target,
+			"home":   spec.Home,
+			"shell":  spec.Shell,
+			"groups": spec.Groups,
+		},
+	})
+}
+
+func (e *ControlExecutor) deleteUser(ctx context.Context, params map[string]any) (string, int, error) {
+	spec, err := parseAccessMutation(params)
+	if err != nil {
+		return "", 1, err
+	}
+	if err := validateUserTarget(spec.Target); err != nil {
+		return "", 1, err
+	}
+	args := []string{"userdel"}
+	if spec.RemoveHome {
+		args = append(args, "-r")
+	}
+	args = append(args, spec.Target)
+	if output, exitCode, err := runPrivilegedCommand(ctx, args...); err != nil {
+		return commandFailure("access.delete-user", "user deletion failed", output, exitCode, err)
+	}
+	return marshalResult(agent.TypedControlResult{
+		Operation: "access.delete-user",
+		Summary:   "user deleted",
+		Data:      map[string]any{"target": spec.Target},
+	})
+}
+
+func (e *ControlExecutor) addGroup(ctx context.Context, params map[string]any) (string, int, error) {
+	spec, err := parseAccessMutation(params)
+	if err != nil {
+		return "", 1, err
+	}
+	if err := validateGroupTarget(spec.Target); err != nil {
+		return "", 1, err
+	}
+	if output, exitCode, err := runPrivilegedCommand(ctx, "groupadd", spec.Target); err != nil {
+		return commandFailure("access.add-group", "group creation failed", output, exitCode, err)
+	}
+	if len(spec.Members) > 0 {
+		if output, exitCode, err := runPrivilegedCommand(ctx, "gpasswd", "-M", strings.Join(spec.Members, ","), spec.Target); err != nil {
+			return commandFailure("access.add-group", "group member assignment failed", output, exitCode, err)
+		}
+	}
+	return marshalResult(agent.TypedControlResult{
+		Operation: "access.add-group",
+		Summary:   "group created",
+		Data: map[string]any{
+			"target":  spec.Target,
+			"members": spec.Members,
+		},
+	})
+}
+
+func (e *ControlExecutor) updateGroup(ctx context.Context, params map[string]any) (string, int, error) {
+	spec, err := parseAccessMutation(params)
+	if err != nil {
+		return "", 1, err
+	}
+	if err := validateGroupTarget(spec.Target); err != nil {
+		return "", 1, err
+	}
+	if spec.RenameTo != "" {
+		if err := validateGroupTarget(spec.RenameTo); err != nil {
+			return "", 1, err
+		}
+		if output, exitCode, err := runPrivilegedCommand(ctx, "groupmod", "-n", spec.RenameTo, spec.Target); err != nil {
+			return commandFailure("access.update-group", "group rename failed", output, exitCode, err)
+		}
+		spec.Target = spec.RenameTo
+	}
+	if len(spec.Members) > 0 {
+		if output, exitCode, err := runPrivilegedCommand(ctx, "gpasswd", "-M", strings.Join(spec.Members, ","), spec.Target); err != nil {
+			return commandFailure("access.update-group", "group membership update failed", output, exitCode, err)
+		}
+	}
+	return marshalResult(agent.TypedControlResult{
+		Operation: "access.update-group",
+		Summary:   "group updated",
+		Data: map[string]any{
+			"target":  spec.Target,
+			"members": spec.Members,
+		},
+	})
+}
+
+func (e *ControlExecutor) deleteGroup(ctx context.Context, params map[string]any) (string, int, error) {
+	spec, err := parseAccessMutation(params)
+	if err != nil {
+		return "", 1, err
+	}
+	if err := validateGroupTarget(spec.Target); err != nil {
+		return "", 1, err
+	}
+	if output, exitCode, err := runPrivilegedCommand(ctx, "groupdel", spec.Target); err != nil {
+		return commandFailure("access.delete-group", "group deletion failed", output, exitCode, err)
+	}
+	return marshalResult(agent.TypedControlResult{
+		Operation: "access.delete-group",
+		Summary:   "group deleted",
+		Data:      map[string]any{"target": spec.Target},
 	})
 }
 
@@ -685,6 +990,13 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func safeSlice(items []string, index int) string {
+	if index < 0 || index >= len(items) {
+		return ""
+	}
+	return strings.TrimSpace(items[index])
+}
+
 func homeDirForUser(user string) string {
 	switch strings.TrimSpace(user) {
 	case "", "root":
@@ -791,8 +1103,152 @@ func validateUserTarget(user string) error {
 	return nil
 }
 
+func validateGroupTarget(group string) error {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return errors.New("target group is required")
+	}
+	if group == "root" {
+		return errors.New("root group mutation is not allowed via typed control operation")
+	}
+	if !groupNamePattern.MatchString(group) {
+		return fmt.Errorf("unsupported group target %q", group)
+	}
+	return nil
+}
+
+type accessMutationSpec struct {
+	Target     string   `json:"target"`
+	RenameTo   string   `json:"rename_to"`
+	Home       string   `json:"home"`
+	Shell      string   `json:"shell"`
+	Groups     []string `json:"groups"`
+	Members    []string `json:"members"`
+	RemoveHome bool     `json:"remove_home"`
+}
+
+func parseAccessMutation(params map[string]any) (accessMutationSpec, error) {
+	spec := accessMutationSpec{
+		Target: strings.TrimSpace(stringParam(params, "target")),
+	}
+	payload := strings.TrimSpace(stringParam(params, "payload"))
+	if payload == "" {
+		return spec, nil
+	}
+	if err := json.Unmarshal([]byte(payload), &spec); err != nil {
+		return accessMutationSpec{}, fmt.Errorf("invalid payload json: %w", err)
+	}
+	spec.Target = firstNonEmpty(strings.TrimSpace(stringParam(params, "target")), strings.TrimSpace(spec.Target))
+	spec.RenameTo = strings.TrimSpace(spec.RenameTo)
+	spec.Home = strings.TrimSpace(spec.Home)
+	spec.Shell = strings.TrimSpace(spec.Shell)
+	spec.Groups = normalizePrincipals(spec.Groups)
+	spec.Members = normalizePrincipals(spec.Members)
+	return spec, nil
+}
+
+func normalizePrincipals(items []string) []string {
+	out := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func runPrivilegedCommand(ctx context.Context, args ...string) (string, int, error) {
+	command := args
+	if commandExists("sudo") {
+		command = append([]string{"sudo"}, args...)
+	}
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return strings.TrimSpace(string(out)), exitErr.ExitCode(), err
+		}
+		return strings.TrimSpace(string(out)), 1, err
+	}
+	return strings.TrimSpace(string(out)), 0, nil
+}
+
+func commandFailure(operation, summary, preview string, exitCode int, err error) (string, int, error) {
+	result, _, marshalErr := marshalResult(agent.TypedControlResult{
+		Operation: operation,
+		Status:    "failed",
+		Summary:   summary,
+		Preview:   strings.TrimSpace(preview),
+	})
+	if marshalErr != nil {
+		return "", exitCode, marshalErr
+	}
+	return result, exitCode, err
+}
+
+func (e *ControlExecutor) authorize(payload agent.ControlOperationPayload) error {
+	if payload.RequiredCapability != "" && payload.RequiredCapability != "control-operation" {
+		definition, ok := agent.LookupControlOperation(payload.Operation)
+		if !ok {
+			return fmt.Errorf("unsupported control operation %q", payload.Operation)
+		}
+		if definition.RequiredCapability() != payload.RequiredCapability {
+			return fmt.Errorf("required capability mismatch for %s", payload.Operation)
+		}
+	}
+
+	payloadTenant := strings.ToLower(strings.TrimSpace(payload.TenantID))
+	if e.tenantID != "" && payloadTenant != "" && payloadTenant != e.tenantID {
+		return fmt.Errorf("tenant mismatch: payload=%q agent=%q", payload.TenantID, e.tenantID)
+	}
+	if payloadTenant != "" {
+		if _, denied := e.tenantDenylist[payloadTenant]; denied {
+			return fmt.Errorf("tenant %q denied by agent policy", payload.TenantID)
+		}
+		if len(e.tenantAllowlist) > 0 {
+			if _, allowed := e.tenantAllowlist[payloadTenant]; !allowed {
+				return fmt.Errorf("tenant %q not in agent allowlist", payload.TenantID)
+			}
+		}
+	}
+
+	groupMatched := len(e.groupAllowlist) == 0
+	for _, group := range payload.ServerGroups {
+		groupKey := strings.ToLower(strings.TrimSpace(group))
+		if groupKey == "" {
+			continue
+		}
+		if _, denied := e.groupDenylist[groupKey]; denied {
+			return fmt.Errorf("server group %q denied by agent policy", group)
+		}
+		if _, allowed := e.groupAllowlist[groupKey]; allowed {
+			groupMatched = true
+		}
+		if roles, ok := e.groupRoleMatrix[groupKey]; ok {
+			if allowedRoles, ok := roles[strings.ToLower(strings.TrimSpace(payload.Operation))]; ok && len(allowedRoles) > 0 {
+				roleKey := strings.ToLower(strings.TrimSpace(payload.ActorRole))
+				if _, allowed := allowedRoles[roleKey]; !allowed {
+					return fmt.Errorf("role %q denied for %s in group %q by agent policy", payload.ActorRole, payload.Operation, group)
+				}
+			}
+		}
+	}
+	if !groupMatched {
+		return fmt.Errorf("server groups %v not in agent allowlist", payload.ServerGroups)
+	}
+	return nil
+}
+
 type packageManager interface {
 	BuildCommand(ctx context.Context, action, packageName string) (*exec.Cmd, error)
+	BuildListCommand(ctx context.Context) (*exec.Cmd, error)
 }
 
 type aptManager struct{}
@@ -830,6 +1286,10 @@ func (aptManager) BuildCommand(ctx context.Context, action, packageName string) 
 	return exec.CommandContext(ctx, "sudo", args...), nil
 }
 
+func (aptManager) BuildListCommand(ctx context.Context) (*exec.Cmd, error) {
+	return exec.CommandContext(ctx, "sh", "-c", "dpkg-query -W -f='${Package}\\t${Version}\\t${Architecture}\\n'"), nil
+}
+
 func (dnfManager) BuildCommand(ctx context.Context, action, packageName string) (*exec.Cmd, error) {
 	if action != "install" && action != "remove" && action != "update" {
 		return nil, fmt.Errorf("unsupported dnf action %q", action)
@@ -841,6 +1301,10 @@ func (dnfManager) BuildCommand(ctx context.Context, action, packageName string) 
 	return exec.CommandContext(ctx, "sudo", args...), nil
 }
 
+func (dnfManager) BuildListCommand(ctx context.Context) (*exec.Cmd, error) {
+	return exec.CommandContext(ctx, "sh", "-c", "rpm -qa --queryformat '%{NAME}\\t%{VERSION}-%{RELEASE}\\t%{ARCH}\\n'"), nil
+}
+
 func (yumManager) BuildCommand(ctx context.Context, action, packageName string) (*exec.Cmd, error) {
 	if action != "install" && action != "remove" && action != "update" {
 		return nil, fmt.Errorf("unsupported yum action %q", action)
@@ -850,6 +1314,10 @@ func (yumManager) BuildCommand(ctx context.Context, action, packageName string) 
 		args = append(args, packageName)
 	}
 	return exec.CommandContext(ctx, "sudo", args...), nil
+}
+
+func (yumManager) BuildListCommand(ctx context.Context) (*exec.Cmd, error) {
+	return exec.CommandContext(ctx, "sh", "-c", "rpm -qa --queryformat '%{NAME}\\t%{VERSION}-%{RELEASE}\\t%{ARCH}\\n'"), nil
 }
 
 func init() {

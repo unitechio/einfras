@@ -1,7 +1,7 @@
 // EINFRA Agent — main entry point
 //
 // This binary runs on each managed server. It connects to the EINFRA
-// Control Plane via WebSocket and:
+// Control Plane via gRPC streaming and:
 //   - Executes commands sent from the control plane
 //   - Streams stdout/stderr back in real-time
 //   - Sends periodic heartbeat metrics (CPU, RAM, disk, Docker status)
@@ -9,7 +9,7 @@
 //
 // Usage:
 //
-//	CONTROL_PLANE_URL=wss://einfra.example.com \
+//	CONTROL_PLANE_URL=https://control-plane.example.com \
 //	AGENT_TOKEN=<issued_token> \
 //	SERVER_ID=<uuid> \
 //	./einfra-agent

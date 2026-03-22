@@ -188,7 +188,9 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
 }
 
 func normalizeLegacyErrorEnvelope(v any) (responseEnvelope, bool) {

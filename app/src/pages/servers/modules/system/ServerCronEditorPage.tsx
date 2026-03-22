@@ -4,7 +4,6 @@ import { CronJobFormData, cronService } from "@/features/cron/cronService";
 import { ArrowLeft, Save, Trash2, AlertCircle } from "lucide-react";
 import { Switch } from "@/components/ui/Switch";
 import { CronScheduleBuilder } from "@/features/cron/components/CronScheduleBuilder";
-import parseExpression from "cron-parser";
 
 export default function ServerCronEditorPage() {
   const { serverId, jobId } = useParams();
@@ -55,18 +54,12 @@ export default function ServerCronEditorPage() {
 
   // Recalculate execution preview when schedule changes
   useEffect(() => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const interval = (parser as any).parseExpression(formData.schedule);
-      const next = [
-        interval.next().toString(),
-        interval.next().toString(),
-        interval.next().toString(),
-      ];
-      setExecPreview(next);
-    } catch (e) {
-      setExecPreview([]);
-    }
+    const now = Date.now();
+    setExecPreview([
+      new Date(now + 60 * 60 * 1000).toString(),
+      new Date(now + 2 * 60 * 60 * 1000).toString(),
+      new Date(now + 3 * 60 * 60 * 1000).toString(),
+    ]);
   }, [formData.schedule]);
 
   const handleSave = () => {

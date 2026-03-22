@@ -1,1171 +1,1299 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
-  Server,
-  Shield,
+  Activity,
+  AlertCircle,
   ArrowLeft,
   CheckCircle2,
-  Network,
-  Lock,
+  Clipboard,
   Globe,
+  Info,
+  Lock,
+  Loader2,
+  Network,
+  Server,
+  Shield,
   Terminal,
-  Activity,
-  Cpu,
-  HardDrive,
-  MemoryStick,
-  Container,
-  Box,
-  RefreshCw,
-  ChevronRight,
-  AlertTriangle,
-  Wifi,
-  Download,
-  Zap,
-  ClipboardCheck,
-  CircleDot,
-  Play,
-  RotateCcw,
+  X,
 } from "lucide-react";
+
+import { useNotification } from "@/core/NotificationContext";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { cn } from "@/lib/utils";
-import {
-  mockOnboardingService,
-  type OnboardingSession,
-  type OnboardingConfig,
-  type OnboardingStep,
-  type OnboardingLogEntry,
-  type OnboardingStepId,
-} from "./modules/shared/mockOnboardingService";
-import CredentialVaultHandler from "./components/CredentialVaultHandler";
+import { serversApi, ApiError, type AgentInstallScriptDTO } from "@/shared/api/client";
+import { useAddServer, useAgentToken } from "../api/useServerHooks";
+import type { Server as ServerModel } from "../types";
 import PrivilegeSettings from "./components/PrivilegeSettings";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+type WizardStep = "basic" | "connection" | "auth" | "privilege" | "complete";
 
-type WizardStep = "basic" | "connection" | "auth" | "privilege" | "onboarding";
+type FormState = {
+  name: string;
+  description: string;
+  hostname: string;
+  ipAddress: string;
+  os: "linux" | "windows";
+  environment: "production" | "staging" | "development";
+  tags: string;
+  connectionMode: "agent" | "ssh" | "bastion";
+  port: string;
+  bastionHost: string;
+  authMethod: "agent_token" | "password" | "ssh_key";
+  password: string;
+  sshKeyPath: string;
+  sshUser: string;
+  privilege: {
+    user: string;
+    escalation: string;
+  };
+};
 
-const WIZARD_STEPS: { id: WizardStep; label: string; icon: any }[] = [
+type OnboardingResult = {
+  server: ServerModel;
+  token?: string;
+  installScript?: string;
+  installCommand?: string;
+  installURL?: string;
+};
+
+type NoticeState = {
+  type: "success" | "error" | "info" | "warning";
+  title: string;
+  description?: string;
+};
+
+type FieldErrorKey =
+  | "name"
+  | "hostname"
+  | "ipAddress"
+  | "port"
+  | "bastionHost"
+  | "password"
+  | "sshKeyPath"
+  | "sshUser"
+  | "privilegeUser";
+
+type FieldErrors = Partial<Record<FieldErrorKey, string>>;
+
+const STEPS: { id: WizardStep; label: string; icon: typeof Globe }[] = [
   { id: "basic", label: "Node Info", icon: Globe },
   { id: "connection", label: "Connection", icon: Network },
-  { id: "auth", label: "Auth", icon: Lock },
-  { id: "privilege", label: "Privilege", icon: Shield },
-  { id: "onboarding", label: "Onboarding", icon: Zap },
+  { id: "auth", label: "Authentication", icon: Lock },
+  { id: "privilege", label: "Privileges", icon: Shield },
+  { id: "complete", label: "Complete", icon: CheckCircle2 },
 ];
 
-// ─── Step status icons / colors ───────────────────────────────────────────────
+const initialForm: FormState = {
+  name: "",
+  description: "",
+  hostname: "",
+  ipAddress: "",
+  os: "linux",
+  environment: "production",
+  tags: "",
+  connectionMode: "agent",
+  port: "22",
+  bastionHost: "",
+  authMethod: "agent_token",
+  password: "",
+  sshKeyPath: "",
+  sshUser: "root",
+  privilege: {
+    user: "root",
+    escalation: "sudo",
+  },
+};
 
-function StepStatusIcon({ status }: { status: OnboardingStep["status"] }) {
-  if (status === "running") {
-    return (
-      <span className="relative flex h-5 w-5 items-center justify-center">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-40" />
-        <CircleDot className="h-4 w-4 text-blue-500 relative z-10" />
-      </span>
-    );
-  }
-  if (status === "success")
-    return <CheckCircle2 className="h-5 w-5 text-emerald-500" />;
-  if (status === "error")
-    return <AlertTriangle className="h-5 w-5 text-red-500" />;
-  return (
-    <div className="h-2.5 w-2.5 rounded-full bg-zinc-300 dark:bg-zinc-700 mx-[5px]" />
-  );
-}
+export default function ServerOnboardingPage() {
+  const navigate = useNavigate();
+  const [step, setStep] = useState<WizardStep>("basic");
+  const [form, setForm] = useState<FormState>(initialForm);
+  const [result, setResult] = useState<OnboardingResult | null>(null);
+  const [submitError, setSubmitError] = useState<string>("");
+  const [agentHealth, setAgentHealth] = useState<{
+    online: boolean;
+    message: string;
+  } | null>(null);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
+  const [agentOnlineAnnounced, setAgentOnlineAnnounced] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
-function logColor(level: OnboardingLogEntry["level"]) {
-  switch (level) {
-    case "success":
-      return "text-emerald-400";
-    case "error":
-      return "text-red-400";
-    case "warn":
-      return "text-amber-400";
-    case "cmd":
-      return "text-sky-300";
-    default:
-      return "text-zinc-600 dark:text-zinc-400";
-  }
-}
+  const addServer = useAddServer();
+  const issueToken = useAgentToken();
+  const { showNotification } = useNotification();
 
-function logPrefix(level: OnboardingLogEntry["level"]) {
-  switch (level) {
-    case "success":
-      return "✓";
-    case "error":
-      return "✗";
-    case "warn":
-      return "⚠";
-    case "cmd":
-      return "$";
-    default:
-      return "›";
-  }
-}
-
-// ─── Terminal Log Panel ───────────────────────────────────────────────────────
-
-function TerminalPanel({ logs }: { logs: OnboardingLogEntry[] }) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const canGoNext = useMemo(() => {
+    switch (step) {
+      case "basic":
+        return !!form.name.trim() && !!form.ipAddress.trim();
+      case "connection":
+        return (
+          !!form.port.trim() &&
+          (form.connectionMode !== "bastion" || !!form.bastionHost.trim())
+        );
+      case "auth":
+        if (form.connectionMode === "agent") {
+          return true;
+        }
+        if (form.authMethod === "password") {
+          return !!form.password.trim();
+        }
+        if (form.authMethod === "ssh_key") {
+          return !!form.sshKeyPath.trim();
+        }
+        return true;
+      case "privilege":
+        return !!form.privilege.user.trim();
+      default:
+        return true;
+    }
+  }, [form, step]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
+    if (form.connectionMode === "agent") {
+      setForm((current) => ({
+        ...current,
+        authMethod: "agent_token",
+      }));
+      return;
+    }
+    if (form.os === "windows") {
+      setForm((current) => ({
+        ...current,
+        authMethod: "password",
+        port: current.port === "22" ? "5985" : current.port,
+      }));
+      return;
+    }
+    if (form.authMethod === "agent_token") {
+      setForm((current) => ({
+        ...current,
+        authMethod: "password",
+      }));
+    }
+  }, [form.connectionMode, form.os, form.authMethod]);
+
+  useEffect(() => {
+    if (!result?.server?.id || result.server.connection_mode !== "agent") {
+      return;
+    }
+    const poll = async () => {
+      setIsCheckingStatus(true);
+      try {
+        const status = await serversApi.healthCheck(result.server.id);
+        setAgentHealth({
+          online: status.healthy,
+          message: status.message,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to check agent status";
+        setAgentHealth({ online: false, message });
+      } finally {
+        setIsCheckingStatus(false);
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [result?.server?.id, result?.server?.connection_mode]);
+
+  useEffect(() => {
+    if (!agentHealth?.online || agentOnlineAnnounced === true) {
+      return;
+    }
+    setAgentOnlineAnnounced(true);
+    setNotice({
+      type: "success",
+      title: "Agent connected successfully",
+      description: "This node is now online and ready for remote operations.",
+    });
+    showNotification({
+      type: "success",
+      message: "Agent online",
+      description: `${result?.server.name ?? "Server"} is now connected.`,
+    });
+  }, [
+    agentHealth?.online,
+    agentOnlineAnnounced,
+    result?.server.name,
+    showNotification,
+  ]);
+
+  const updateField = <K extends keyof FormState>(
+    key: K,
+    value: FormState[K],
+  ) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    const mappedKey =
+      key === "ipAddress"
+        ? "ipAddress"
+        : key === "sshUser"
+          ? "sshUser"
+          : key === "hostname"
+            ? "hostname"
+            : key === "port"
+              ? "port"
+              : undefined;
+    if (mappedKey) {
+      setFieldErrors((current) => {
+        if (!current[mappedKey]) return current;
+        const next = { ...current };
+        delete next[mappedKey];
+        return next;
+      });
+    }
+  };
+
+  const nextStep = async () => {
+    if (step === "privilege") {
+      await submit();
+      return;
+    }
+    const index = STEPS.findIndex((item) => item.id === step);
+    if (index >= 0 && index < STEPS.length - 2) {
+      setStep(STEPS[index + 1].id);
+    }
+  };
+
+  const previousStep = () => {
+    const index = STEPS.findIndex((item) => item.id === step);
+    if (index > 0) {
+      setStep(STEPS[index - 1].id);
+    }
+  };
+
+  const submit = async () => {
+    setSubmitError("");
+    const validationErrors = validateForm(form);
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
+      const firstStep = resolveStepForErrors(validationErrors);
+      if (firstStep !== step) {
+        setStep(firstStep);
+      }
+      setNotice({
+        type: "warning",
+        title: "Please review highlighted fields",
+        description:
+          "A few required values need to be fixed before this node can be created.",
+      });
+      return;
+    }
+    setFieldErrors({});
+    setNotice({
+      type: "info",
+      title: "Creating server record",
+      description:
+        "Sending the new node definition to backend and preparing onboarding.",
+    });
+    try {
+      const created = await addServer.mutateAsync({
+        name: form.name.trim(),
+        description: form.description.trim(),
+        hostname: (form.hostname || form.name).trim(),
+        ip_address: form.ipAddress.trim(),
+        os: form.os,
+        environment: form.environment,
+        connection_mode: form.connectionMode,
+        ssh_port:
+          Number.parseInt(form.port, 10) || (form.os === "windows" ? 5985 : 22),
+        ssh_user: form.privilege.user.trim() || form.sshUser.trim() || "root",
+        ssh_password:
+          form.connectionMode === "agent" || form.authMethod !== "password"
+            ? undefined
+            : form.password,
+        ssh_key_path:
+          form.connectionMode === "agent" || form.authMethod !== "ssh_key"
+            ? undefined
+            : form.sshKeyPath.trim(),
+        tags: parseTags(form.tags),
+      });
+
+      if (form.connectionMode !== "agent") {
+        setResult({ server: created });
+        setNotice({
+          type: "success",
+          title: "Server created",
+          description: "Direct-managed node has been registered successfully.",
+        });
+        showNotification({
+          type: "success",
+          message: "Server created",
+          description: `${created.name} is ready in the server list.`,
+        });
+        setStep("complete");
+        return;
+      }
+
+      const [{ token }, install] = await Promise.all([
+        issueToken.mutateAsync(created.id),
+        serversApi.installScript(created.id),
+      ]);
+
+      setResult({
+        server: created,
+        token,
+        installScript: resolveInstallScript(install),
+        installCommand: install.command,
+        installURL: install.install_url,
+      });
+      setNotice({
+        type: "success",
+        title: "Server created and agent onboarding prepared",
+        description:
+          "Copy the install script below and run it on the target node.",
+      });
+      showNotification({
+        type: "success",
+        message: "Node created",
+        description: `Token and install script are ready for ${created.name}.`,
+      });
+      setStep("complete");
+    } catch (error) {
+      const message = normalizeErrorMessage(error);
+      setFieldErrors(mapBackendFieldErrors(message));
+      if (error instanceof ApiError) {
+        setSubmitError(message);
+      } else if (error instanceof Error) {
+        setSubmitError(message);
+      } else {
+        setSubmitError("Failed to create server");
+      }
+      setNotice({
+        type: "error",
+        title: "Add node failed",
+        description: message,
+      });
+      showNotification({
+        type: "error",
+        message: "Add node failed",
+        description: message,
+      });
+    }
+  };
+
+  const copyValue = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setNotice({
+        type: "success",
+        title: "Copied to clipboard",
+        description: "You can now paste it into the target node terminal.",
+      });
+      showNotification({
+        type: "success",
+        message: "Copied",
+        description: "Value copied to clipboard.",
+        duration: 2500,
+      });
+    } catch {
+      const message = "Copy failed. Please copy manually.";
+      setSubmitError(message);
+      setNotice({
+        type: "warning",
+        title: "Clipboard unavailable",
+        description: message,
+      });
+      showNotification({
+        type: "warning",
+        message: "Clipboard unavailable",
+        description: message,
+      });
+    }
+  };
+
+  const renderStep = () => {
+    switch (step) {
+      case "basic":
+        return (
+          <div className="space-y-6">
+            <SectionTitle
+              title="Node Information"
+              description="Create the server record that backend management, monitoring, and agent control will use."
+            />
+            <div className="grid gap-5 md:grid-cols-2">
+              <Field label="Display Name" required>
+                <Input
+                  value={form.name}
+                  onChange={(e) => updateField("name", e.target.value)}
+                  placeholder="prod-web-01"
+                  icon={<Server className="h-4 w-4" />}
+                  className={inputErrorClass(fieldErrors.name)}
+                />
+                <FieldErrorText message={fieldErrors.name} />
+              </Field>
+              <Field label="Hostname">
+                <Input
+                  value={form.hostname}
+                  onChange={(e) => updateField("hostname", e.target.value)}
+                  placeholder="prod-web-01.internal"
+                  className={inputErrorClass(fieldErrors.hostname)}
+                />
+                <FieldErrorText message={fieldErrors.hostname} />
+              </Field>
+              <Field label="IP / FQDN" required>
+                <Input
+                  value={form.ipAddress}
+                  onChange={(e) => updateField("ipAddress", e.target.value)}
+                  placeholder="10.10.1.24"
+                  className={inputErrorClass(fieldErrors.ipAddress)}
+                />
+                <FieldErrorText message={fieldErrors.ipAddress} />
+              </Field>
+              <Field label="Environment">
+                <select
+                  value={form.environment}
+                  onChange={(e) =>
+                    updateField(
+                      "environment",
+                      e.target.value as FormState["environment"],
+                    )
+                  }
+                  className="h-9 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                  <option value="production">Production</option>
+                  <option value="staging">Staging</option>
+                  <option value="development">Development</option>
+                </select>
+              </Field>
+            </div>
+            <div className="grid gap-5 md:grid-cols-2">
+              <Field label="Operating System">
+                <div className="grid grid-cols-2 gap-3">
+                  <ChoiceButton
+                    active={form.os === "linux"}
+                    title="Linux"
+                    description="SSH or Agent"
+                    onClick={() => {
+                      updateField("os", "linux");
+                      updateField(
+                        "port",
+                        form.connectionMode === "agent"
+                          ? "22"
+                          : form.port || "22",
+                      );
+                      updateField("sshUser", "root");
+                      setForm((current) => ({
+                        ...current,
+                        privilege: { user: "root", escalation: "sudo" },
+                      }));
+                    }}
+                  />
+                  <ChoiceButton
+                    active={form.os === "windows"}
+                    title="Windows"
+                    description="Agent preferred"
+                    onClick={() => {
+                      updateField("os", "windows");
+                      updateField("port", "5985");
+                      updateField("connectionMode", "agent");
+                      setForm((current) => ({
+                        ...current,
+                        privilege: {
+                          user: "Administrator",
+                          escalation: "admin",
+                        },
+                      }));
+                    }}
+                  />
+                </div>
+              </Field>
+              <Field label="Tags">
+                <Input
+                  value={form.tags}
+                  onChange={(e) => updateField("tags", e.target.value)}
+                  placeholder="production, web, critical"
+                />
+              </Field>
+            </div>
+            <Field label="Description">
+              <textarea
+                rows={4}
+                value={form.description}
+                onChange={(e) => updateField("description", e.target.value)}
+                placeholder="Public-facing web server for production traffic"
+                className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+              />
+            </Field>
+          </div>
+        );
+      case "connection":
+        return (
+          <div className="space-y-6">
+            <SectionTitle
+              title="Connection Strategy"
+              description="Choose how this node will be managed. Agent mode is the production-safe default."
+            />
+            <div className="grid gap-4 md:grid-cols-3">
+              <ChoiceButton
+                active={form.connectionMode === "agent"}
+                title="Agent"
+                description="Recommended. Outbound only."
+                onClick={() => {
+                  updateField("connectionMode", "agent");
+                  updateField("authMethod", "agent_token");
+                  updateField("port", form.os === "windows" ? "5985" : "22");
+                }}
+              />
+              <ChoiceButton
+                active={form.connectionMode === "ssh"}
+                title={form.os === "windows" ? "WinRM" : "Direct"}
+                description={
+                  form.os === "windows"
+                    ? "Direct WinRM login"
+                    : "Direct SSH login"
+                }
+                onClick={() => {
+                  updateField("connectionMode", "ssh");
+                  updateField("authMethod", "password");
+                  updateField("port", form.os === "windows" ? "5985" : "22");
+                }}
+              />
+              <ChoiceButton
+                active={form.connectionMode === "bastion"}
+                title="Bastion"
+                description="Connect through jump host"
+                onClick={() => {
+                  updateField("connectionMode", "bastion");
+                  updateField("authMethod", "password");
+                }}
+              />
+            </div>
+            <div className="grid gap-5 md:grid-cols-2">
+              <Field label="Port" required>
+                <Input
+                  value={form.port}
+                  onChange={(e) => updateField("port", e.target.value)}
+                  placeholder={form.os === "windows" ? "5985" : "22"}
+                  className={inputErrorClass(fieldErrors.port)}
+                />
+                <FieldErrorText message={fieldErrors.port} />
+              </Field>
+              <Field label="Login User">
+                <Input
+                  value={form.sshUser}
+                  onChange={(e) => updateField("sshUser", e.target.value)}
+                  placeholder={form.os === "windows" ? "Administrator" : "root"}
+                  className={inputErrorClass(fieldErrors.sshUser)}
+                />
+                <FieldErrorText message={fieldErrors.sshUser} />
+              </Field>
+            </div>
+            {form.connectionMode === "bastion" && (
+              <Field label="Bastion Host" required>
+                <Input
+                  value={form.bastionHost}
+                  onChange={(e) => updateField("bastionHost", e.target.value)}
+                  placeholder="jump-prod.internal"
+                  className={inputErrorClass(fieldErrors.bastionHost)}
+                />
+                <FieldErrorText message={fieldErrors.bastionHost} />
+              </Field>
+            )}
+          </div>
+        );
+      case "auth":
+        return (
+          <div className="space-y-6">
+            <SectionTitle
+              title="Authentication"
+              description={
+                form.connectionMode === "agent"
+                  ? "Agent mode does not need a pre-issued token from the user. Backend will issue the token after the server record is created."
+                  : "Choose the credential type that matches this node."
+              }
+            />
+            {form.connectionMode === "agent" ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                Agent onboarding is automatic after create: FE will request an
+                agent token and installation script from backend for this node.
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-3">
+                  <ChoiceChip
+                    active={form.authMethod === "password"}
+                    label="Password"
+                    onClick={() => updateField("authMethod", "password")}
+                  />
+                  {form.os === "linux" && (
+                    <ChoiceChip
+                      active={form.authMethod === "ssh_key"}
+                      label="SSH Key Path"
+                      onClick={() => updateField("authMethod", "ssh_key")}
+                    />
+                  )}
+                </div>
+                {form.authMethod === "password" && (
+                  <Field
+                    label={
+                      form.os === "windows"
+                        ? "Password / WinRM Secret"
+                        : "SSH Password"
+                    }
+                    required
+                  >
+                    <Input
+                      type="password"
+                      value={form.password}
+                      onChange={(e) => updateField("password", e.target.value)}
+                      placeholder="Enter secret"
+                      className={inputErrorClass(fieldErrors.password)}
+                    />
+                    <FieldErrorText message={fieldErrors.password} />
+                  </Field>
+                )}
+                {form.authMethod === "ssh_key" && (
+                  <Field label="SSH Key Path" required>
+                    <Input
+                      value={form.sshKeyPath}
+                      onChange={(e) =>
+                        updateField("sshKeyPath", e.target.value)
+                      }
+                      placeholder="/home/einfra/.ssh/id_ed25519"
+                      className={inputErrorClass(fieldErrors.sshKeyPath)}
+                    />
+                    <FieldErrorText message={fieldErrors.sshKeyPath} />
+                    <p className="mt-2 text-xs text-zinc-500">
+                      Backend hiện lưu `ssh_key_path`, không nhận private key
+                      raw từ UI. Dùng path có sẵn trên control node hoặc agent
+                      host.
+                    </p>
+                  </Field>
+                )}
+              </>
+            )}
+          </div>
+        );
+      case "privilege":
+        return (
+          <div className="space-y-6">
+            <SectionTitle
+              title="Privileges"
+              description="Set the execution user used by server operations and automation."
+            />
+            <div className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+              <PrivilegeSettings
+                os={form.os}
+                value={form.privilege}
+                onChange={(value) => updateField("privilege", value)}
+              />
+              <FieldErrorText
+                message={fieldErrors.privilegeUser}
+                className="mt-3"
+              />
+            </div>
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+              <div className="mb-2 flex items-center gap-2 font-semibold text-zinc-900 dark:text-zinc-100">
+                <Activity className="h-4 w-4" />
+                Ready to create
+              </div>
+              <ul className="space-y-1 text-zinc-600 dark:text-zinc-400">
+                <li>Name: {form.name || "-"}</li>
+                <li>Target: {form.ipAddress || "-"}</li>
+                <li>Mode: {form.connectionMode}</li>
+                <li>
+                  Auth:{" "}
+                  {form.connectionMode === "agent"
+                    ? "agent token (issued by backend)"
+                    : form.authMethod}
+                </li>
+              </ul>
+            </div>
+          </div>
+        );
+      case "complete":
+        return (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 dark:border-emerald-900/40 dark:bg-emerald-950/30">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+                <div>
+                  <h2 className="text-lg font-semibold text-emerald-900 dark:text-emerald-200">
+                    Server created successfully
+                  </h2>
+                  <p className="text-sm text-emerald-800 dark:text-emerald-300">
+                    Node is now registered in backend and ready for onboarding.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {result && (
+              <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+                <div className="space-y-5 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+                  <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    Server Summary
+                  </h3>
+                  <SummaryRow label="Server ID" value={result.server.id} />
+                  <SummaryRow label="Name" value={result.server.name} />
+                  <SummaryRow
+                    label="Hostname"
+                    value={result.server.hostname ?? result.server.name}
+                  />
+                  <SummaryRow label="Target" value={result.server.ip_address} />
+                  <SummaryRow
+                    label="Mode"
+                    value={result.server.connection_mode ?? "agent"}
+                  />
+                  <SummaryRow
+                    label="Onboarding Status"
+                    value={result.server.onboarding_status ?? "pending"}
+                  />
+                  {result.server.connection_mode === "agent" && (
+                    <SummaryRow
+                      label="Agent Status"
+                      value={
+                        agentHealth?.online
+                          ? "online"
+                          : isCheckingStatus
+                            ? "checking"
+                            : "waiting for agent"
+                      }
+                    />
+                  )}
+                </div>
+
+                <div className="space-y-5">
+                  {result.token && (
+                    <CopyCard
+                      title="Agent Token"
+                      value={result.token}
+                      onCopy={copyValue}
+                    />
+                  )}
+                  {result.installScript && (
+                    <CopyCard
+                      title="Install Script"
+                      value={result.installScript}
+                      onCopy={copyValue}
+                      multiline
+                    />
+                  )}
+                  {result.installCommand && (
+                    <CopyCard
+                      title="Quick Install Command"
+                      value={result.installCommand}
+                      onCopy={copyValue}
+                    />
+                  )}
+                  {result.installURL && (
+                    <CopyCard
+                      title="Install URL"
+                      value={result.installURL}
+                      onCopy={copyValue}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {result?.server.connection_mode === "agent" && (
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+                <div className="mb-3 flex items-center gap-2 font-semibold text-zinc-900 dark:text-zinc-100">
+                  <Terminal className="h-4 w-4" />
+                  Next step
+                </div>
+                <ol className="list-decimal space-y-2 pl-5 text-zinc-600 dark:text-zinc-400">
+                  <li>Copy the install script.</li>
+                  <li>Run it on the target node as root / Administrator.</li>
+                  <li>
+                    Return here and wait until Agent Status becomes `online`.
+                  </li>
+                </ol>
+              </div>
+            )}
+          </div>
+        );
+    }
+  };
+
+  const currentStepIndex = STEPS.findIndex((item) => item.id === step);
 
   return (
-    <div className="relative flex flex-col h-full min-h-0">
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-900/80 rounded-t-xl">
-        <div className="flex gap-1.5">
-          <div className="w-3 h-3 rounded-full bg-red-500/80" />
-          <div className="w-3 h-3 rounded-full bg-amber-500/80" />
-          <div className="w-3 h-3 rounded-full bg-emerald-500/80" />
-        </div>
-        <span className="text-[11px] font-mono text-zinc-500 ml-2">
-          einfra — onboarding log
-        </span>
-        <div className="ml-auto flex items-center gap-1.5 text-zinc-500">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-[10px] font-mono">LIVE</span>
+    <div className="mx-auto space-y-8 pb-16">
+      <div className="space-y-3">
+        <Link
+          to="/servers"
+          className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to servers
+        </Link>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+              Add New Node
+            </h1>
+            <p className="mt-2 max-w-3xl text-sm text-zinc-500 dark:text-zinc-400">
+              This flow is mapped to the real backend. It creates the server
+              record first, then optionally issues an agent token and install
+              script for production-style onboarding.
+            </p>
+          </div>
+          {result && (
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/servers/${result.server.id}/overview`)}
+            >
+              Open Server
+            </Button>
+          )}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 font-mono text-[12px] leading-relaxed space-y-1 bg-zinc-50 dark:bg-zinc-950 rounded-b-xl">
-        {logs.length === 0 && (
-          <span className="text-zinc-600">
-            Waiting for onboarding to start...
-          </span>
-        )}
-        {logs.map((entry, i) => (
-          <div
-            key={i}
-            className="flex items-start gap-2.5 group hover:bg-zinc-900/50 -mx-2 px-2 py-0.5 rounded"
-          >
-            <span className="text-zinc-700 shrink-0 tabular-nums w-20 pt-px text-[10px]">
-              {new Date(entry.ts).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              })}
-            </span>
-            <span
-              className={cn("shrink-0 font-bold pt-px", logColor(entry.level))}
-            >
-              {logPrefix(entry.level)}
-            </span>
-            <span
-              className={cn("break-all leading-relaxed", logColor(entry.level))}
-            >
-              {entry.message}
-            </span>
-          </div>
-        ))}
-        <div ref={bottomRef} />
+
+      <div className="grid gap-8 lg:grid-cols-[260px_1fr]">
+        <aside className="space-y-3">
+          {STEPS.map((item, index) => {
+            const Icon = item.icon;
+            const active = item.id === step;
+            const completed = index < currentStepIndex;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                disabled={!completed && !active}
+                onClick={() => (completed ? setStep(item.id) : undefined)}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-all",
+                  active &&
+                    "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-500/50 dark:bg-blue-950/30 dark:text-blue-300",
+                  !active &&
+                    completed &&
+                    "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300",
+                  !active &&
+                    !completed &&
+                    "border-zinc-200 bg-zinc-50 text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-600",
+                )}
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/80 text-current dark:bg-zinc-900">
+                  {completed ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    <Icon className="h-4 w-4" />
+                  )}
+                </div>
+                <div>
+                  <div className="text-sm font-semibold">{item.label}</div>
+                  <div className="text-xs opacity-75">Step {index + 1}</div>
+                </div>
+              </button>
+            );
+          })}
+        </aside>
+
+        <section className="space-y-6 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+          {notice && (
+            <OperationNotice
+              type={notice.type}
+              title={notice.title}
+              description={notice.description}
+              onClose={() => setNotice(null)}
+            />
+          )}
+
+          {submitError && !notice && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">
+              {submitError}
+            </div>
+          )}
+
+          {renderStep()}
+
+          {step !== "complete" && (
+            <div className="flex items-center justify-between border-t border-zinc-200 pt-6 dark:border-zinc-800">
+              <Button
+                variant="outline"
+                onClick={previousStep}
+                disabled={currentStepIndex === 0}
+              >
+                Previous
+              </Button>
+              <Button
+                onClick={() => void nextStep()}
+                isLoading={addServer.isPending || issueToken.isPending}
+                disabled={!canGoNext}
+              >
+                {step === "privilege" ? "Create Server" : "Next"}
+              </Button>
+            </div>
+          )}
+
+          {step === "complete" && (
+            <div className="flex items-center justify-between border-t border-zinc-200 pt-6 dark:border-zinc-800">
+              <Button variant="outline" onClick={() => navigate("/servers")}>
+                Back to List
+              </Button>
+              <Button onClick={() => window.location.reload()}>
+                Add Another Node
+              </Button>
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );
 }
 
-// ─── Onboarding Progress Steps ────────────────────────────────────────────────
+function resolveInstallScript(install: AgentInstallScriptDTO) {
+  return install.script || install.install_script || "";
+}
 
-function OnboardingProgressPanel({
-  session,
-  onRetry,
+function SectionTitle({
+  title,
+  description,
 }: {
-  session: OnboardingSession;
-  onRetry: (fromStep: OnboardingStepId) => void;
+  title: string;
+  description: string;
 }) {
-  const stepIcons: Record<OnboardingStepId, any> = {
-    connection_test: Wifi,
-    agent_install: Download,
-    verify: ClipboardCheck,
-    sync_resources: RefreshCw,
-    complete: CheckCircle2,
-  };
-
-  const failedStep = session.steps.find((s) => s.status === "error");
-
   return (
-    <div className="space-y-3">
-      {session.steps.map((step, i) => {
-        const Icon = stepIcons[step.id] ?? Activity;
-        const isActive = step.status === "running";
-        const isDone = step.status === "success";
-        const isFailed = step.status === "error";
+    <div>
+      <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+        {title}
+      </h2>
+      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+        {description}
+      </p>
+    </div>
+  );
+}
 
-        return (
-          <div
-            key={step.id}
-            className={cn(
-              "relative flex items-center gap-4 p-4 rounded-xl border transition-all duration-300",
-              isActive &&
-                "bg-blue-50/50 dark:bg-blue-500/5 border-blue-200/60 dark:border-blue-500/20",
-              isDone &&
-                "bg-emerald-50/30 dark:bg-emerald-500/5 border-emerald-200/60 dark:border-emerald-500/20",
-              isFailed &&
-                "bg-red-50/50 dark:bg-red-500/5 border-red-200/60 dark:border-red-500/20",
-              !isActive &&
-                !isDone &&
-                !isFailed &&
-                "bg-zinc-50/30 dark:bg-zinc-900/30 border-zinc-200/40 dark:border-zinc-800/40",
-            )}
-          >
-            {/* Step number connector */}
-            {i < session.steps.length - 1 && (
-              <div
-                className={cn(
-                  "absolute left-[30px] top-full h-3 w-px",
-                  isDone
-                    ? "bg-emerald-300 dark:bg-emerald-800"
-                    : "bg-zinc-200 dark:bg-zinc-800",
-                )}
-              />
-            )}
+function Field({
+  label,
+  children,
+  required,
+}: {
+  label: string;
+  children: React.ReactNode;
+  required?: boolean;
+}) {
+  return (
+    <label className="block space-y-2">
+      <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+        {label} {required ? <span className="text-red-500">*</span> : null}
+      </span>
+      {children}
+    </label>
+  );
+}
 
-            {/* Icon */}
-            <div
-              className={cn(
-                "flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center border",
-                isActive &&
-                  "bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/30 text-blue-600 dark:text-blue-400",
-                isDone &&
-                  "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30 text-emerald-600 dark:text-emerald-400",
-                isFailed &&
-                  "bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400",
-                !isActive &&
-                  !isDone &&
-                  !isFailed &&
-                  "bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400",
-              )}
-            >
-              <Icon size={16} className={isActive ? "animate-pulse" : ""} />
-            </div>
+function FieldErrorText({
+  message,
+  className,
+}: {
+  message?: string;
+  className?: string;
+}) {
+  if (!message) {
+    return null;
+  }
+  return (
+    <p className={cn("text-xs font-medium text-red-500", className)}>
+      {message}
+    </p>
+  );
+}
 
-            {/* Content */}
-            <div className="flex-1 min-w-0">
-              <p
-                className={cn(
-                  "font-semibold text-[13px] tracking-tight",
-                  isActive && "text-blue-800 dark:text-blue-300",
-                  isDone && "text-emerald-800 dark:text-emerald-300",
-                  isFailed && "text-red-800 dark:text-red-300",
-                  !isActive &&
-                    !isDone &&
-                    !isFailed &&
-                    "text-zinc-500 dark:text-zinc-500",
-                )}
-              >
-                {step.label}
-              </p>
-              <p className="text-[11px] text-zinc-500 mt-0.5 truncate">
-                {step.description}
-              </p>
-              {isFailed && step.errorMessage && (
-                <p className="text-[11px] text-red-500 mt-1 font-medium">
-                  {step.errorMessage}
-                </p>
-              )}
-              {isDone && step.startedAt && step.completedAt && (
-                <p className="text-[10px] text-emerald-600 dark:text-emerald-500 mt-0.5 font-mono">
-                  {((step.completedAt - step.startedAt) / 1000).toFixed(1)}s
-                </p>
-              )}
-            </div>
+function ChoiceButton({
+  active,
+  title,
+  description,
+  onClick,
+}: {
+  active: boolean;
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-2xl border px-4 py-4 text-left transition-all",
+        active
+          ? "border-blue-500 bg-blue-50 dark:border-blue-500/50 dark:bg-blue-950/30"
+          : "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950",
+      )}
+    >
+      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+        {title}
+      </div>
+      <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        {description}
+      </div>
+    </button>
+  );
+}
 
-            {/* Status indicator */}
-            <div className="shrink-0">
-              <StepStatusIcon status={step.status} />
-            </div>
-          </div>
-        );
-      })}
+function ChoiceChip({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-4 py-2 text-sm transition-all",
+        active
+          ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-500/50 dark:bg-blue-950/30 dark:text-blue-300"
+          : "border-zinc-200 bg-white text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300",
+      )}
+    >
+      {label}
+    </button>
+  );
+}
 
-      {/* Retry button */}
-      {failedStep && (
-        <div className="pt-2">
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => onRetry(failedStep.id)}
-            className="w-full gap-2"
-          >
-            <RotateCcw size={14} />
-            Retry from "{failedStep.label}"
-          </Button>
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-zinc-100 py-2 text-sm last:border-b-0 dark:border-zinc-800">
+      <span className="text-zinc-500 dark:text-zinc-400">{label}</span>
+      <span className="max-w-[65%] break-all text-right font-medium text-zinc-900 dark:text-zinc-100">
+        {value || "-"}
+      </span>
+    </div>
+  );
+}
+
+function CopyCard({
+  title,
+  value,
+  onCopy,
+  multiline,
+}: {
+  title: string;
+  value: string;
+  onCopy: (value: string) => Promise<void>;
+  multiline?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+          {title}
+        </h3>
+        <Button variant="outline" size="sm" onClick={() => void onCopy(value)}>
+          <Clipboard className="mr-2 h-4 w-4" />
+          Copy
+        </Button>
+      </div>
+      {multiline ? (
+        <pre className="max-h-[320px] overflow-auto whitespace-pre-wrap rounded-xl bg-zinc-950 p-4 text-xs text-zinc-100">
+          {value}
+        </pre>
+      ) : (
+        <div className="break-all rounded-xl bg-zinc-50 p-4 font-mono text-xs dark:bg-zinc-950 dark:text-zinc-100">
+          {value}
         </div>
       )}
     </div>
   );
 }
 
-// ─── System Info Card ─────────────────────────────────────────────────────────
-
-function SystemInfoCard({ session }: { session: OnboardingSession }) {
-  const info = session.sysInfo;
-  if (!info) return null;
+function OperationNotice({
+  type,
+  title,
+  description,
+  onClose,
+}: {
+  type: "success" | "error" | "info" | "warning";
+  title: string;
+  description?: string;
+  onClose: () => void;
+}) {
+  const variants = {
+    success: {
+      icon: CheckCircle2,
+      shell:
+        "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200",
+      iconBox:
+        "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
+    },
+    error: {
+      icon: AlertCircle,
+      shell:
+        "border-red-200 bg-red-50 text-red-900 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200",
+      iconBox: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+    },
+    warning: {
+      icon: Info,
+      shell:
+        "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200",
+      iconBox:
+        "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+    },
+    info: {
+      icon: Loader2,
+      shell:
+        "border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-200",
+      iconBox:
+        "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+    },
+  };
+  const variant = variants[type];
+  const Icon = variant.icon;
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-5">
-      {/* Success Hero */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 p-6 text-zinc-900 dark:text-white shadow-xl">
-        <div className="absolute -top-6 -right-6 w-36 h-36 rounded-full bg-white/10 blur-2xl" />
-        <div className="absolute -bottom-8 -left-8 w-40 h-40 rounded-full bg-white/10 blur-2xl" />
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
-              <CheckCircle2 className="text-zinc-900 dark:text-white" size={20} />
-            </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-widest font-bold text-emerald-100 opacity-80">
-                Node Registered
-              </p>
-              <h3 className="text-xl font-bold tracking-tight">
-                {session.serverName}
-              </h3>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {[session.serverIp, info.os, info.arch].map((tag) => (
-              <span
-                key={tag}
-                className="px-2.5 py-1 rounded-full bg-white/20 text-xs font-semibold backdrop-blur-sm"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        </div>
+    <div
+      className={cn(
+        "flex items-start gap-3 rounded-2xl border px-4 py-4",
+        variant.shell,
+      )}
+    >
+      <div className={cn("mt-0.5 rounded-xl p-2", variant.iconBox)}>
+        <Icon className={cn("h-4 w-4", type === "info" && "animate-spin")} />
       </div>
-
-      {/* Hardware grid */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          {
-            icon: Cpu,
-            label: "vCPU",
-            value: `${info.cpuCores} cores`,
-            sub: info.cpu.split("@")[0].trim(),
-            color: "text-blue-500",
-            bg: "bg-blue-50 dark:bg-blue-500/10 border-blue-100 dark:border-blue-500/20",
-          },
-          {
-            icon: MemoryStick,
-            label: "Memory",
-            value: `${info.ramGb} GB`,
-            sub: "RAM",
-            color: "text-purple-500",
-            bg: "bg-purple-50 dark:bg-purple-500/10 border-purple-100 dark:border-purple-500/20",
-          },
-          {
-            icon: HardDrive,
-            label: "Storage",
-            value: `${info.diskGb} GB`,
-            sub: "Primary disk",
-            color: "text-orange-500",
-            bg: "bg-orange-50 dark:bg-orange-500/10 border-orange-100 dark:border-orange-500/20",
-          },
-        ].map((item) => (
-          <div
-            key={item.label}
-            className={cn("rounded-xl border p-4", item.bg)}
-          >
-            <item.icon className={cn("mb-2", item.color)} size={18} />
-            <p className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-              {item.value}
-            </p>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mt-0.5">
-              {item.label}
-            </p>
-            <p className="text-[10px] text-zinc-500 mt-1 leading-snug truncate">
-              {item.sub}
-            </p>
-          </div>
-        ))}
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold">{title}</div>
+        {description ? (
+          <div className="mt-1 text-sm opacity-85">{description}</div>
+        ) : null}
       </div>
-
-      {/* Runtime detection */}
-      <div className="rounded-xl border border-zinc-200/60 dark:border-zinc-800/60 bg-white dark:bg-[#121212] divide-y divide-zinc-200/60 dark:divide-zinc-800/60 overflow-hidden">
-        <div className="px-5 py-3 bg-zinc-50/50 dark:bg-zinc-800/20">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-            Detected Runtimes
-          </p>
-        </div>
-        <div className="px-5 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                "w-8 h-8 rounded-lg flex items-center justify-center border",
-                info.hasDocker
-                  ? "bg-blue-50 dark:bg-blue-500/10 border-blue-100 dark:border-blue-500/20 text-blue-500"
-                  : "bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400",
-              )}
-            >
-              <Container size={16} />
-            </div>
-            <div>
-              <p className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                Docker
-              </p>
-              <p className="text-[11px] text-zinc-500">
-                {info.dockerVersion ?? "Not detected"}
-              </p>
-            </div>
-          </div>
-          {info.hasDocker ? (
-            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border bg-emerald-50 border-emerald-100 text-emerald-600 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-400">
-              Active
-            </span>
-          ) : (
-            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border bg-zinc-50 border-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:border-zinc-700">
-              Not Found
-            </span>
-          )}
-        </div>
-        <div className="px-5 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                "w-8 h-8 rounded-lg flex items-center justify-center border",
-                info.hasKubernetes
-                  ? "bg-indigo-50 dark:bg-indigo-500/10 border-indigo-100 dark:border-indigo-500/20 text-indigo-500"
-                  : "bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400",
-              )}
-            >
-              <Box size={16} />
-            </div>
-            <div>
-              <p className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                Kubernetes
-              </p>
-              <p className="text-[11px] text-zinc-500">
-                {info.k8sVersion ?? "Not detected"}
-              </p>
-            </div>
-          </div>
-          {info.hasKubernetes ? (
-            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border bg-emerald-50 border-emerald-100 text-emerald-600 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-400">
-              Active
-            </span>
-          ) : (
-            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border bg-zinc-50 border-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:border-zinc-700">
-              Not Found
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Agent info */}
-      <div className="flex items-center justify-between px-4 py-3 rounded-xl border border-zinc-200/60 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-900/30">
-        <div className="flex items-center gap-3">
-          <Activity size={16} className="text-zinc-600 dark:text-zinc-400" />
-          <div>
-            <p className="text-[12px] font-semibold text-zinc-700 dark:text-zinc-300">
-              EINFRA Agent
-            </p>
-            <p className="text-[11px] text-zinc-500">v{info.agentVersion}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
-            Reporting
-          </span>
-        </div>
-      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        className="rounded-lg p-1 text-current/70 transition-colors hover:bg-black/5 hover:text-current dark:hover:bg-white/5"
+      >
+        <X className="h-4 w-4" />
+      </button>
     </div>
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+function parseTags(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
-export default function ServerOnboardingPage() {
-  const navigate = useNavigate();
+function normalizeErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    const message = error.message.replace(/^\[[^\]]+\]\s*/, "").trim();
+    return message || "Request failed";
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "Request failed";
+}
 
-  // ── Wizard state ───────────────────────────────────────────────────────────
-  const [wizardStep, setWizardStep] = useState<WizardStep>("basic");
+function inputErrorClass(message?: string) {
+  return message
+    ? "border-red-300 focus-visible:ring-red-500 dark:border-red-700"
+    : undefined;
+}
 
-  const [formData, setFormData] = useState({
-    name: "",
-    description: "",
-    tags: "",
-    os: "linux" as "linux" | "windows",
-    mode: "agent" as "agent" | "direct" | "bastion",
-    ip: "",
-    port: "22",
-    bastionHost: "",
-    authMethod: "ssh_key" as
-      | "ssh_key"
-      | "password"
-      | "agent_token"
-      | "winrm"
-      | "ad",
-    credential: { method: "manual", value: "" },
-    privilege: { user: "root", escalation: "sudo" },
+function validateForm(form: FormState): FieldErrors {
+  const errors: FieldErrors = {};
+  const hostnameValue = (form.hostname || form.name).trim();
+  const hostnameRegex = /^(?=.{1,253}$)(?!-)[a-zA-Z0-9.-]+(?<!-)$/;
+  const fqdnRegex = /^(?=.{1,253}$)(?!-)[a-zA-Z0-9.-]+(?<!-)$/;
+  const port = Number.parseInt(form.port, 10);
+
+  if (!form.name.trim()) {
+    errors.name = "Display name is required.";
+  }
+  if (!form.ipAddress.trim()) {
+    errors.ipAddress = "IP or FQDN is required.";
+  } else if (
+    !fqdnRegex.test(form.ipAddress.trim()) &&
+    !isValidIPv4(form.ipAddress.trim())
+  ) {
+    errors.ipAddress = "Enter a valid IPv4 address or host name.";
+  }
+  if (!hostnameValue) {
+    errors.hostname = "Hostname is required.";
+  } else if (!hostnameRegex.test(hostnameValue)) {
+    errors.hostname = "Hostname contains invalid characters.";
+  }
+  if (!form.port.trim()) {
+    errors.port = "Port is required.";
+  } else if (Number.isNaN(port) || port < 1 || port > 65535) {
+    errors.port = "Port must be between 1 and 65535.";
+  }
+  if (!form.sshUser.trim() && form.connectionMode !== "agent") {
+    errors.sshUser = "Login user is required for direct access.";
+  }
+  if (form.connectionMode === "bastion" && !form.bastionHost.trim()) {
+    errors.bastionHost = "Bastion host is required.";
+  }
+  if (
+    form.connectionMode !== "agent" &&
+    form.authMethod === "password" &&
+    !form.password.trim()
+  ) {
+    errors.password = "Password is required.";
+  }
+  if (
+    form.connectionMode !== "agent" &&
+    form.authMethod === "ssh_key" &&
+    !form.sshKeyPath.trim()
+  ) {
+    errors.sshKeyPath = "SSH key path is required.";
+  }
+  if (!form.privilege.user.trim()) {
+    errors.privilegeUser = "Execution user is required.";
+  }
+
+  return errors;
+}
+
+function mapBackendFieldErrors(message: string): FieldErrors {
+  const lowered = message.toLowerCase();
+  const errors: FieldErrors = {};
+
+  if (
+    lowered.includes("already exists") &&
+    (lowered.includes("ip") || lowered.includes("host"))
+  ) {
+    errors.ipAddress = "This IP or FQDN is already registered.";
+  }
+  if (lowered.includes("hostname")) {
+    errors.hostname = "Hostname is invalid or already in use.";
+  }
+  if (lowered.includes("port")) {
+    errors.port = "Port value is invalid.";
+  }
+
+  return errors;
+}
+
+function resolveStepForErrors(errors: FieldErrors): WizardStep {
+  if (errors.name || errors.hostname || errors.ipAddress) {
+    return "basic";
+  }
+  if (errors.port || errors.bastionHost || errors.sshUser) {
+    return "connection";
+  }
+  if (errors.password || errors.sshKeyPath) {
+    return "auth";
+  }
+  return "privilege";
+}
+
+function isValidIPv4(value: string) {
+  const parts = value.split(".");
+  if (parts.length !== 4) {
+    return false;
+  }
+
+  return parts.every((part) => {
+    const numeric = Number.parseInt(part, 10);
+    return String(numeric) === part && numeric >= 0 && numeric <= 255;
   });
-
-  const updateField = (field: string, value: any) =>
-    setFormData((p) => ({ ...p, [field]: value }));
-
-  // ── Onboarding state ───────────────────────────────────────────────────────
-  const [session, setSession] = useState<OnboardingSession | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
-  const sessionIdRef = useRef<string | null>(null);
-
-  const currentWizardIndex = WIZARD_STEPS.findIndex((s) => s.id === wizardStep);
-
-  const handleNext = () => {
-    const idx = WIZARD_STEPS.findIndex((s) => s.id === wizardStep);
-    if (idx < WIZARD_STEPS.length - 1) {
-      setWizardStep(WIZARD_STEPS[idx + 1].id);
-    }
-  };
-
-  const handleBack = () => {
-    if (wizardStep === "onboarding") return; // Can't go back while/after onboarding
-    const idx = WIZARD_STEPS.findIndex((s) => s.id === wizardStep);
-    if (idx > 0) setWizardStep(WIZARD_STEPS[idx - 1].id);
-  };
-
-  // ── Start onboarding ───────────────────────────────────────────────────────
-  const startOnboarding = useCallback(async () => {
-    const config: OnboardingConfig = {
-      serverName: formData.name || "new-server",
-      ip: formData.ip || "192.168.1.100",
-      port: formData.port,
-      os: formData.os,
-      mode: formData.mode,
-      authMethod: formData.authMethod,
-      bastionHost: formData.bastionHost,
-      sshUser: formData.privilege.user,
-    };
-
-    const newSession = mockOnboardingService.createSession(config);
-    sessionIdRef.current = newSession.id;
-    setSession(newSession);
-    setIsRunning(true);
-
-    try {
-      await mockOnboardingService.startOnboarding(newSession.id, (updated) => {
-        setSession({ ...updated });
-      });
-    } finally {
-      setIsRunning(false);
-    }
-  }, [formData]);
-
-  const handleLaunch = () => {
-    setWizardStep("onboarding");
-    // Small delay so the step renders before starting
-    setTimeout(startOnboarding, 300);
-  };
-
-  const handleRetry = useCallback(async (fromStep: OnboardingStepId) => {
-    if (!sessionIdRef.current) return;
-    setIsRunning(true);
-    try {
-      await mockOnboardingService.retryFromStep(
-        sessionIdRef.current,
-        fromStep,
-        (updated) => setSession({ ...updated }),
-      );
-    } finally {
-      setIsRunning(false);
-    }
-  }, []);
-
-  const isOnboarding = wizardStep === "onboarding";
-  const isComplete = session?.overallStatus === "ACTIVE";
-  const isFailed = session?.overallStatus === "FAILED";
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Render form steps
-  // ─────────────────────────────────────────────────────────────────────────
-
-  const renderFormStep = () => {
-    switch (wizardStep) {
-      case "basic":
-        return (
-          <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-400">
-            <div>
-              <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-                Node Information
-              </h2>
-              <p className="text-sm text-zinc-500 mt-1">
-                Provide the basic identifier details for your infrastructure
-                node.
-              </p>
-            </div>
-            <div className="space-y-6 max-w-xl">
-              <div className="space-y-2">
-                <label className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                  Display Name <span className="text-red-500">*</span>
-                </label>
-                <Input
-                  value={formData.name}
-                  onChange={(e) => updateField("name", e.target.value)}
-                  placeholder="e.g. prod-db-primary"
-                  icon={<Server className="w-4 h-4" />}
-                  className="h-10"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                  Operating System
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    {
-                      id: "linux",
-                      label: "Linux",
-                      icon: <Terminal className="w-5 h-5" />,
-                      sub: "Ubuntu · Debian · RHEL",
-                    },
-                    {
-                      id: "windows",
-                      label: "Windows",
-                      icon: <Server className="w-5 h-5" />,
-                      sub: "Server 2019/2022",
-                    },
-                  ].map((os) => (
-                    <button
-                      key={os.id}
-                      onClick={() => {
-                        updateField("os", os.id);
-                        updateField("port", os.id === "linux" ? "22" : "5985");
-                        updateField(
-                          "authMethod",
-                          os.id === "linux" ? "ssh_key" : "agent_token",
-                        );
-                      }}
-                      className={cn(
-                        "flex items-center gap-3 p-4 rounded-xl border-2 text-left transition-all",
-                        formData.os === os.id
-                          ? "border-zinc-900 dark:border-white bg-zinc-50 dark:bg-zinc-800/40"
-                          : "border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-300 dark:border-zinc-700 bg-white dark:bg-[#121212]",
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "w-9 h-9 rounded-lg flex items-center justify-center border",
-                          formData.os === os.id
-                            ? "bg-white dark:bg-zinc-900 dark:bg-white text-zinc-900 dark:text-white dark:text-zinc-900 border-transparent"
-                            : "bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500",
-                        )}
-                      >
-                        {os.icon}
-                      </div>
-                      <div>
-                        <p className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
-                          {os.label}
-                        </p>
-                        <p className="text-[11px] text-zinc-500">{os.sub}</p>
-                      </div>
-                      {formData.os === os.id && (
-                        <CheckCircle2
-                          className="ml-auto text-zinc-900 dark:text-white"
-                          size={16}
-                        />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                  Description
-                </label>
-                <textarea
-                  rows={3}
-                  value={formData.description}
-                  onChange={(e) => updateField("description", e.target.value)}
-                  className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-4 py-3 text-[13px] text-zinc-900 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none placeholder:text-zinc-600 dark:text-zinc-400"
-                  placeholder="Briefly describe the server's purpose..."
-                />
-              </div>
-            </div>
-          </div>
-        );
-
-      case "connection":
-        return (
-          <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-400">
-            <div>
-              <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-                Connection Routing
-              </h2>
-              <p className="text-sm text-zinc-500 mt-1">
-                Configure how EINFRA orchestrator communicates with this node.
-              </p>
-            </div>
-            <div className="space-y-6">
-              <div className="space-y-3">
-                <label className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100 block">
-                  Routing Strategy
-                </label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-3xl">
-                  {[
-                    {
-                      id: "agent",
-                      label: "EINFRA Agent",
-                      desc: "Outbound only. Best for NAT/Firewalled servers.",
-                      icon: Activity,
-                      badge: "Recommended",
-                    },
-                    {
-                      id: "direct",
-                      label: "Direct SSH",
-                      desc: "TCP connection on port 22. Requires whitelist.",
-                      icon: Network,
-                    },
-                    {
-                      id: "bastion",
-                      label: "Bastion Host",
-                      desc: "Jump through a secure gateway.",
-                      icon: Shield,
-                    },
-                  ].map((mode) => (
-                    <button
-                      key={mode.id}
-                      onClick={() => updateField("mode", mode.id)}
-                      className={cn(
-                        "relative p-5 rounded-xl border-2 text-left transition-all",
-                        formData.mode === mode.id
-                          ? "border-zinc-900 dark:border-white bg-zinc-50/50 dark:bg-zinc-800/20"
-                          : "border-zinc-200/60 dark:border-zinc-800/60 hover:border-zinc-300 dark:hover:border-zinc-300 dark:border-zinc-700 bg-white dark:bg-[#121212]",
-                      )}
-                    >
-                      {mode.badge && (
-                        <span className="absolute top-3 right-3 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-500/20">
-                          {mode.badge}
-                        </span>
-                      )}
-                      <div
-                        className={cn(
-                          "w-9 h-9 rounded-lg flex items-center justify-center border mb-3",
-                          formData.mode === mode.id
-                            ? "bg-white dark:bg-zinc-900 dark:bg-white text-zinc-900 dark:text-white dark:text-zinc-900 border-transparent"
-                            : "bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500",
-                        )}
-                      >
-                        <mode.icon size={18} />
-                      </div>
-                      <p className="font-semibold text-[13px] text-zinc-900 dark:text-zinc-100">
-                        {mode.label}
-                      </p>
-                      <p className="text-[12px] text-zinc-500 mt-1 leading-relaxed">
-                        {mode.desc}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-5 border-t border-zinc-200/60 dark:border-zinc-800/60 max-w-xl">
-                <div className="space-y-2">
-                  <label className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                    IP Address / FQDN <span className="text-red-500">*</span>
-                  </label>
-                  <Input
-                    value={formData.ip}
-                    onChange={(e) => updateField("ip", e.target.value)}
-                    placeholder="10.0.1.45"
-                    className="font-mono h-10"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                    Port
-                  </label>
-                  <Input
-                    value={formData.port}
-                    onChange={(e) => updateField("port", e.target.value)}
-                    placeholder="22"
-                    className="font-mono h-10 max-w-[120px]"
-                  />
-                </div>
-                {formData.mode === "bastion" && (
-                  <div className="md:col-span-2 space-y-2">
-                    <label className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                      Bastion Host
-                    </label>
-                    <select
-                      value={formData.bastionHost}
-                      onChange={(e) =>
-                        updateField("bastionHost", e.target.value)
-                      }
-                      className="flex h-10 w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-                    >
-                      <option value="">Select a gateway...</option>
-                      <option value="bastion-01">
-                        prod-bastion-us-east (10.0.0.1)
-                      </option>
-                      <option value="bastion-02">
-                        prod-bastion-eu-west (10.0.0.2)
-                      </option>
-                    </select>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-
-      case "auth":
-        return (
-          <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-400">
-            <div>
-              <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-                Authentication
-              </h2>
-              <p className="text-sm text-zinc-500 mt-1">
-                Securely credential the orchestrator access to this node.
-              </p>
-            </div>
-            <div className="space-y-5 max-w-xl">
-              <div className="space-y-3">
-                <label className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100 block">
-                  Method
-                </label>
-                <div className="flex flex-wrap gap-2 p-1.5 rounded-lg bg-zinc-100/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/60 w-fit">
-                  {(formData.os === "linux"
-                    ? ["ssh_key", "password", "agent_token"]
-                    : ["agent_token", "winrm", "ad"]
-                  ).map((m) => {
-                    const labels: any = {
-                      ssh_key: "SSH Key",
-                      password: "Password",
-                      agent_token: "Agent Token",
-                      winrm: "WinRM",
-                      ad: "Active Directory",
-                    };
-                    const isCurrent = formData.authMethod === m;
-                    return (
-                      <button
-                        key={m}
-                        onClick={() => updateField("authMethod", m)}
-                        className={cn(
-                          "px-3.5 py-2 text-[13px] font-semibold rounded-md transition-all",
-                          isCurrent
-                            ? "bg-white dark:bg-[#1C1C1C] text-zinc-900 dark:text-white shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-700"
-                            : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-800 dark:text-zinc-200",
-                        )}
-                      >
-                        {labels[m]}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="pt-1">
-                <CredentialVaultHandler
-                  type={
-                    formData.authMethod.includes("key")
-                      ? "privateKey"
-                      : formData.authMethod.includes("token")
-                        ? "token"
-                        : "password"
-                  }
-                  label={
-                    formData.authMethod === "ssh_key"
-                      ? "Private Key Material"
-                      : formData.authMethod === "agent_token"
-                        ? "Installation Token"
-                        : "Secret"
-                  }
-                  onChange={(val) => updateField("credential", val)}
-                />
-              </div>
-            </div>
-          </div>
-        );
-
-      case "privilege":
-        return (
-          <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-400">
-            <div>
-              <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-                Privilege Escalation
-              </h2>
-              <p className="text-sm text-zinc-500 mt-1">
-                Configure runtime context for playbooks and remote operations.
-              </p>
-            </div>
-            <div className="max-w-xl bg-zinc-50/50 dark:bg-zinc-900/30 border border-zinc-200 dark:border-zinc-800/80 rounded-xl p-6">
-              <PrivilegeSettings
-                os={formData.os}
-                value={formData.privilege}
-                onChange={(val) => updateField("privilege", val)}
-              />
-            </div>
-
-            {/* Summary before launch */}
-            <div className="max-w-xl space-y-2">
-              <p className="text-[13px] font-bold text-zinc-900 dark:text-zinc-100 mb-3">
-                Review before launch
-              </p>
-              <div className="rounded-xl border border-zinc-200/60 dark:border-zinc-800/60 bg-white dark:bg-[#121212] divide-y divide-zinc-200/60 dark:divide-zinc-800/60 overflow-hidden text-[13px]">
-                {[
-                  { label: "Node Name", value: formData.name || "—" },
-                  {
-                    label: "OS",
-                    value: formData.os === "linux" ? "Linux" : "Windows",
-                  },
-                  {
-                    label: "IP / Port",
-                    value: `${formData.ip || "—"}:${formData.port}`,
-                  },
-                  { label: "Connection Mode", value: formData.mode },
-                  {
-                    label: "Auth Method",
-                    value: formData.authMethod.replace("_", " ").toUpperCase(),
-                  },
-                  { label: "Run as User", value: formData.privilege.user },
-                ].map((row) => (
-                  <div
-                    key={row.label}
-                    className="flex items-center justify-between px-5 py-3"
-                  >
-                    <span className="text-zinc-500 font-medium">
-                      {row.label}
-                    </span>
-                    <span className="font-semibold text-zinc-900 dark:text-zinc-100 font-mono">
-                      {row.value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        );
-
-      default:
-        return null;
-    }
-  };
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Render onboarding progress page
-  // ─────────────────────────────────────────────────────────────────────────
-
-  const renderOnboardingStep = () => {
-    if (!session) {
-      return (
-        <div className="flex items-center justify-center h-48">
-          <div className="flex flex-col items-center gap-3 text-zinc-600 dark:text-zinc-400">
-            <RefreshCw size={28} className="animate-spin" />
-            <p className="text-sm font-medium">
-              Initializing onboarding session...
-            </p>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="animate-in fade-in slide-in-from-right-4 duration-400">
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-              {isComplete
-                ? "Node Registered Successfully!"
-                : isFailed
-                  ? "Onboarding Failed"
-                  : "Onboarding in Progress..."}
-            </h2>
-            {isRunning && (
-              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                Running
-              </span>
-            )}
-            {isComplete && (
-              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-500/20">
-                <CheckCircle2 size={12} />
-                Active
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {isComplete
-              ? `"${session.serverName}" is now live in your cluster. View it in the server list.`
-              : `Connecting to ${session.serverIp} and setting up the EINFRA agent...`}
-          </p>
-        </div>
-
-        {/* On complete: show system info. On running/failed: show progress + logs */}
-        {isComplete && session.sysInfo ? (
-          <div className="space-y-6">
-            <SystemInfoCard session={session} />
-            <div className="flex gap-3">
-              <Button
-                variant="primary"
-                size="md"
-                onClick={() => navigate("/servers")}
-                className="flex-1 sm:flex-none"
-              >
-                <Server size={15} className="mr-2" /> View in Server List
-              </Button>
-              <Button
-                variant="outline"
-                size="md"
-                onClick={() => navigate(`/servers`)}
-              >
-                Go to Dashboard
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left: Steps */}
-            <OnboardingProgressPanel session={session} onRetry={handleRetry} />
-            {/* Right: Logs */}
-            <div className="h-[520px] flex flex-col rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800">
-              <TerminalPanel logs={session.logs} />
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Main Layout
-  // ─────────────────────────────────────────────────────────────────────────
-
-  return (
-    <div className="flex flex-col gap-6 animate-in fade-in duration-500 pb-20">
-      {/* Top nav */}
-      <div className="mb-8">
-        <Link
-          to="/servers"
-          className="inline-flex items-center text-[13px] font-medium text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors mb-5"
-        >
-          <ArrowLeft className="w-4 h-4 mr-1.5" /> Back to Servers
-        </Link>
-        <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 mb-1.5">
-          Connect Infrastructure Node
-        </h1>
-        <p className="text-[14px] text-zinc-500 dark:text-zinc-400">
-          Follow the onboarding process to securely register a server into the
-          cluster.
-        </p>
-      </div>
-
-      {/* Step indicator ribbon */}
-      <div className="flex items-center gap-0 mb-10 overflow-x-auto scrollbar-hide">
-        {WIZARD_STEPS.map((step, idx) => {
-          const isActive = step.id === wizardStep;
-          const isCompleted = currentWizardIndex > idx;
-          const Icon = step.icon;
-
-          return (
-            <div key={step.id} className="flex items-center shrink-0">
-              <button
-                onClick={() => {
-                  if (isCompleted && step.id !== "onboarding")
-                    setWizardStep(step.id);
-                }}
-                disabled={!isCompleted && !isActive}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-2.5 rounded-lg text-[13px] font-semibold transition-all",
-                  isActive &&
-                    "bg-white dark:bg-zinc-900 dark:bg-white text-zinc-900 dark:text-white dark:text-zinc-900",
-                  isCompleted &&
-                    !isActive &&
-                    "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-100 dark:bg-zinc-800 cursor-pointer",
-                  !isCompleted &&
-                    !isActive &&
-                    "text-zinc-600 dark:text-zinc-400 dark:text-zinc-600 cursor-not-allowed",
-                )}
-              >
-                {isCompleted ? (
-                  <CheckCircle2
-                    size={15}
-                    className="text-emerald-500 shrink-0"
-                  />
-                ) : (
-                  <Icon size={15} className="shrink-0" />
-                )}
-                <span className="hidden sm:inline">{step.label}</span>
-              </button>
-              {idx < WIZARD_STEPS.length - 1 && (
-                <ChevronRight
-                  size={16}
-                  className={cn(
-                    "mx-1 shrink-0",
-                    isCompleted
-                      ? "text-zinc-600 dark:text-zinc-400"
-                      : "text-zinc-700 dark:text-zinc-300 dark:text-zinc-700",
-                  )}
-                />
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Main content card */}
-      <div className="bg-white dark:bg-[#0E0E0E] border border-zinc-200/60 dark:border-zinc-800/60 rounded-2xl shadow-sm overflow-hidden">
-        <div className="p-8 lg:p-10">
-          {isOnboarding ? renderOnboardingStep() : renderFormStep()}
-        </div>
-
-        {/* Footer navigation (hidden during onboarding) */}
-        {!isOnboarding && (
-          <div className="px-8 lg:px-10 py-5 border-t border-zinc-200/60 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-900/30 flex items-center justify-between">
-            <Button
-              variant="outline"
-              size="md"
-              onClick={handleBack}
-              disabled={wizardStep === "basic"}
-              className={cn(
-                "w-28",
-                wizardStep === "basic" && "opacity-0 pointer-events-none",
-              )}
-            >
-              <ArrowLeft size={14} className="mr-1.5" /> Back
-            </Button>
-
-            <div className="flex items-center gap-1.5">
-              {WIZARD_STEPS.filter((s) => s.id !== "onboarding").map((s, i) => (
-                <div
-                  key={s.id}
-                  className={cn(
-                    "w-2 h-2 rounded-full transition-all duration-300",
-                    s.id === wizardStep
-                      ? "bg-white dark:bg-zinc-900 dark:bg-white w-5"
-                      : currentWizardIndex > i
-                        ? "bg-emerald-500"
-                        : "bg-zinc-300 dark:bg-zinc-700",
-                  )}
-                />
-              ))}
-            </div>
-
-            {wizardStep === "privilege" ? (
-              <Button
-                variant="primary"
-                size="md"
-                onClick={handleLaunch}
-                disabled={!formData.name || !formData.ip}
-                className="w-40 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 border-transparent shadow-lg shadow-blue-500/20 disabled:opacity-50"
-              >
-                <Play size={14} className="mr-1.5" />
-                Launch Onboarding
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="md"
-                onClick={handleNext}
-                disabled={wizardStep === "basic" && !formData.name}
-                className="w-28 bg-white dark:bg-zinc-900 dark:bg-white text-zinc-900 dark:text-white dark:text-zinc-900 border-transparent hover:opacity-90"
-              >
-                Continue <ChevronRight size={14} className="ml-1" />
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
 }

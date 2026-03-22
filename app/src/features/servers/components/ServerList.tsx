@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useServers } from '../api/useServers';
+import { serversApi } from '@/shared/api/client';
 import { Badge } from '@/shared/ui/Badge';
 import { Button } from '@/shared/ui/Button';
 import {
@@ -10,12 +11,82 @@ import {
   TableBody,
   TableCell,
 } from '@/shared/ui/Table';
-import { MoreHorizontal, HardDrive, Cpu, TerminalSquare } from 'lucide-react';
+import { MoreHorizontal, HardDrive, Cpu, TerminalSquare, Activity, Settings, Wrench, Terminal, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useNotification } from '@/core/NotificationContext';
 
 export const ServerList = () => {
   const [page, setPage] = useState(1);
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
+  const { showNotification } = useNotification();
   const { data, isLoading, isError, error, refetch } = useServers({ page, page_size: 10 });
+
+  const updateMenuPosition = (serverId: string) => {
+    const button = triggerRefs.current[serverId];
+    if (!button) {
+      return;
+    }
+    const rect = button.getBoundingClientRect();
+    setMenuPosition({
+      top: rect.bottom + 8,
+      right: window.innerWidth - rect.right,
+    });
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setActiveMenu(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (!activeMenu) {
+      setMenuPosition(null);
+      return;
+    }
+
+    const syncPosition = () => updateMenuPosition(activeMenu);
+    syncPosition();
+    window.addEventListener('scroll', syncPosition, true);
+    window.addEventListener('resize', syncPosition);
+    return () => {
+      window.removeEventListener('scroll', syncPosition, true);
+      window.removeEventListener('resize', syncPosition);
+    };
+  }, [activeMenu]);
+
+  const handleDeleteServer = async (serverId: string, serverName: string) => {
+    try {
+      setIsDeleting(true);
+      await serversApi.delete(serverId);
+      setActiveMenu(null);
+      setPendingDelete(null);
+      await refetch();
+      showNotification({
+        type: 'success',
+        message: 'Node deleted',
+        description: `${serverName} has been removed from server management.`,
+      });
+    } catch (deleteError) {
+      showNotification({
+        type: 'error',
+        message: 'Delete failed',
+        description: deleteError instanceof Error ? deleteError.message : 'Unable to delete this node.',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -101,7 +172,7 @@ export const ServerList = () => {
 
   return (
     <div className="space-y-4">
-      <div className="bg-white dark:bg-[#121212] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-white dark:bg-[#121212] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm overflow-visible">
         <Table>
           <TableHeader>
             <TableRow>
@@ -152,9 +223,48 @@ export const ServerList = () => {
                   </div>
                 </TableCell>
                 <TableCell className="text-right">
-                  <Button variant="ghost" size="icon" className="opacity-0 group-hover:opacity-100 transition-opacity">
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
+                  <div className="relative inline-flex" ref={activeMenu === s.id ? menuRef : null}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity"
+                      ref={(node) => {
+                        triggerRefs.current[s.id] = node;
+                      }}
+                      onClick={() => {
+                        if (activeMenu === s.id) {
+                          setActiveMenu(null);
+                          return;
+                        }
+                        updateMenuPosition(s.id);
+                        setActiveMenu(s.id);
+                      }}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                    {activeMenu === s.id && menuPosition && (
+                      <div
+                        ref={menuRef}
+                        className="fixed z-[80] min-w-[200px] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-[#121212]"
+                        style={{ top: menuPosition.top, right: menuPosition.right }}
+                      >
+                        <MenuLink to={`/servers/${s.id}/overview`} icon={Activity} label="Open Dashboard" onClick={() => setActiveMenu(null)} />
+                        <MenuLink to={`/servers/${s.id}/services`} icon={Wrench} label="Manage Services" onClick={() => setActiveMenu(null)} />
+                        <MenuLink to={`/servers/${s.id}/system/terminal`} icon={Terminal} label="Open Terminal" onClick={() => setActiveMenu(null)} />
+                        <MenuLink to={`/servers/${s.id}/system/info`} icon={Settings} label="Server Settings" onClick={() => setActiveMenu(null)} />
+                        <button
+                          onClick={() => {
+                            setActiveMenu(null);
+                            setPendingDelete({ id: s.id, name: s.name });
+                          }}
+                          className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                        >
+                          <Trash2 size={15} />
+                          <span>Delete Node</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -188,6 +298,63 @@ export const ServerList = () => {
           </div>
         </div>
       </div>
+
+      {pendingDelete && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-[#121212]">
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-red-50 p-3 text-red-600 dark:bg-red-900/20 dark:text-red-400">
+                <Trash2 size={18} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Delete node</h3>
+                <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                  Remove <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pendingDelete.name}</span> from server management? This action cannot be undone from the UI.
+                </p>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setPendingDelete(null)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                isLoading={isDeleting}
+                onClick={() => void handleDeleteServer(pendingDelete.id, pendingDelete.name)}
+              >
+                Delete Node
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
+function MenuLink({
+  to,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  to: string;
+  icon: typeof Activity;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <Link
+      to={to}
+      onClick={onClick}
+      className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+    >
+      <Icon size={15} />
+      <span>{label}</span>
+    </Link>
+  );
+}

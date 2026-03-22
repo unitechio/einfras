@@ -3,45 +3,50 @@ package grpcclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
-	"log"
+	"math/rand"
+	"net"
+	"net/http"
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	agent "einfra/api/internal/modules/agent/domain"
 	agentpb "einfra/api/internal/modules/agent/infrastructure/grpcpb"
 	"einfra/api/internal/platform/agentruntime/collector"
 	"einfra/api/internal/platform/agentruntime/config"
 	"einfra/api/internal/platform/agentruntime/executor"
+	"einfra/api/internal/platform/loggingx"
 )
 
-// GRPCCLient manages the gRPC lifecycle and command execution.
 type GRPCClient struct {
 	cfg    *config.Config
 	conn   *grpc.ClientConn
 	client agentpb.AgentServiceClient
-	stream agentpb.AgentService_ConnectStreamClient
 
-	// executors
 	cmdExecutor     *executor.CommandExecutor
 	serviceExecutor *executor.ServiceExecutor
 	controlExecutor *executor.ControlExecutor
 
-	// tasks tracks active executions by task_id
 	tasks   map[string]context.CancelFunc
 	tasksMu sync.Mutex
 
-	// outCh for streaming events to the server
 	outCh chan *agentpb.AgentEvent
 
 	closeOnce sync.Once
+	targetIdx int
+	tracker   *loggingx.StateTracker
 }
 
-// NewGRPC creates a new agent gRPC client.
 func NewGRPC(cfg *config.Config) *GRPCClient {
 	return &GRPCClient{
 		cfg:             cfg,
@@ -50,123 +55,267 @@ func NewGRPC(cfg *config.Config) *GRPCClient {
 		serviceExecutor: executor.NewServiceExecutor(),
 		controlExecutor: executor.NewControlExecutor(cfg),
 		outCh:           make(chan *agentpb.AgentEvent, 100),
+		tracker:         loggingx.NewStateTracker(),
 	}
 }
 
-// Connect establishes a connection and starts the stream.
 func (c *GRPCClient) Connect(ctx context.Context) {
+	attempt := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return
 		}
-		if err := c.dial(); err != nil {
-			log.Printf("[agent] gRPC dial failed: %v — retry in 5s", err)
-			if !sleepWithContext(ctx, 5*time.Second) {
+
+		c.preflight(ctx)
+		target := c.nextTarget()
+		if target == "" {
+			loggingx.New("agent").Error(log.Logger, "grpc-target-missing", c.cfg.ServerID, "error", map[string]any{
+				"grpc_targets": c.cfg.GRPCTargets(),
+			})
+			return
+		}
+
+		if err := c.connectAndServe(ctx, target); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			if status.Code(err) == codes.Unauthenticated {
+				loggingx.New("agent").Error(log.Logger, "grpc-auth", c.cfg.ServerID, "rejected", map[string]any{
+					"target": target,
+					"error":  err.Error(),
+				})
+				return
+			}
+			delay := c.backoff(attempt)
+			attempt++
+			if c.tracker.Changed("grpc-disconnect:"+target, "disconnected") {
+				loggingx.New("agent").Warn(log.Logger, "grpc-connection", c.cfg.ServerID, "disconnected", map[string]any{
+					"target":       target,
+					"retry_in_ms":  delay.Milliseconds(),
+					"error":        err.Error(),
+					"grpc_targets": c.cfg.GRPCTargets(),
+				})
+			}
+			if !sleepWithContext(ctx, delay) {
 				return
 			}
 			continue
 		}
 
-		if err := c.runStream(ctx); err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			log.Printf("[agent] stream error: %v — reconnecting...", err)
-			_ = c.conn.Close()
-			if !sleepWithContext(ctx, 3*time.Second) {
-				return
-			}
-		}
+		attempt = 0
 	}
 }
 
-func (c *GRPCClient) dial() error {
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+func (c *GRPCClient) connectAndServe(ctx context.Context, target string) error {
+	if err := c.closeConn(); err != nil {
+		loggingx.New("agent").Warn(log.Logger, "grpc-close-previous", c.cfg.ServerID, "warn", map[string]any{
+			"target": target,
+			"error":  err.Error(),
+		})
 	}
-	conn, err := grpc.NewClient(c.cfg.GRPCURL, opts...)
+
+	conn, client, err := c.dial(ctx, target)
 	if err != nil {
 		return err
 	}
 	c.conn = conn
-	c.client = agentpb.NewAgentServiceClient(conn)
-	return nil
-}
+	c.client = client
 
-func (c *GRPCClient) runStream(ctx context.Context) error {
 	streamCtx := metadata.AppendToOutgoingContext(ctx,
 		"server-id", c.cfg.ServerID,
 		"authorization", "Bearer "+c.cfg.AgentToken,
 	)
-
 	stream, err := c.client.ConnectStream(streamCtx)
 	if err != nil {
+		_ = c.closeConn()
 		return err
 	}
-	c.stream = stream
 
-	log.Printf("[agent] gRPC stream established with %s ✓", c.cfg.GRPCURL)
+	if c.tracker.Changed("grpc-connect:"+target, "connected") {
+		loggingx.New("agent").Info(log.Logger, "grpc-register", c.cfg.ServerID, "connected", map[string]any{
+			"target":             target,
+			"heartbeat_interval": c.cfg.HeartbeatInterval.String(),
+		})
+	}
 
-	// Send initial registration
-	m := collector.Collect()
+	metrics := collector.Collect()
 	c.SendEvent(&agentpb.AgentEvent{
 		Payload: &agentpb.AgentEvent_Register{
 			Register: &agentpb.RegisterRequest{
 				AgentVersion: c.cfg.Version,
-				Os:           m.OS,
-				Arch:         m.Arch,
+				Os:           metrics.OS,
+				Arch:         metrics.Arch,
 				Capabilities: agent.AgentAdvertisedCapabilities(),
 			},
 		},
 	})
 
-	// Start outgoing loop
-	go c.writeLoop(ctx)
+	writeCtx, cancelWrite := context.WithCancel(ctx)
+	defer cancelWrite()
+	writeErrCh := make(chan error, 1)
+	go c.writeLoop(writeCtx, stream, writeErrCh)
 
-	// Handle incoming messages
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
+			cancelWrite()
+			select {
+			case sendErr := <-writeErrCh:
+				if sendErr != nil && !errors.Is(sendErr, context.Canceled) {
+					loggingx.New("agent").Warn(log.Logger, "grpc-write-loop", c.cfg.ServerID, "ended", map[string]any{
+						"target": target,
+						"error":  sendErr.Error(),
+					})
+				}
+			default:
+			}
+			_ = c.closeConn()
 			return err
 		}
 		go c.handleControlMessage(msg)
 	}
 }
 
-func (c *GRPCClient) writeLoop(ctx context.Context) {
+func (c *GRPCClient) dial(ctx context.Context, target string) (*grpc.ClientConn, agentpb.AgentServiceClient, error) {
+	dialCtx, cancel := context.WithTimeout(ctx, c.cfg.ConnectTimeout)
+	defer cancel()
+
+	conn, err := grpc.DialContext(
+		dialCtx,
+		target,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                20 * time.Second,
+			Timeout:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	return conn, agentpb.NewAgentServiceClient(conn), nil
+}
+
+func (c *GRPCClient) writeLoop(ctx context.Context, stream agentpb.AgentService_ConnectStreamClient, errCh chan<- error) {
+	defer close(errCh)
 	for {
 		select {
 		case <-ctx.Done():
+			errCh <- ctx.Err()
 			return
 		case event, ok := <-c.outCh:
 			if !ok {
+				errCh <- nil
 				return
 			}
 			event.ServerId = c.cfg.ServerID
 			event.TimestampMs = time.Now().UnixMilli()
-			if err := c.stream.Send(event); err != nil {
-				log.Printf("[agent] failed to send event: %v", err)
+			if err := stream.Send(event); err != nil {
+				errCh <- err
 				return
 			}
 		}
 	}
 }
 
-// SendEvent enqueues an event for the control plane.
 func (c *GRPCClient) SendEvent(event *agentpb.AgentEvent) {
 	select {
 	case c.outCh <- event:
 	default:
-		log.Printf("[agent] outCh full — dropping event")
+		loggingx.New("agent").Warn(log.Logger, "outbound-queue", c.cfg.ServerID, "dropped", map[string]any{
+			"reason": "queue full",
+		})
 	}
 }
 
 func (c *GRPCClient) Close() {
 	c.closeOnce.Do(func() {
-		if c.conn != nil {
-			_ = c.conn.Close()
-		}
+		close(c.outCh)
+		_ = c.closeConn()
 	})
+}
+
+func (c *GRPCClient) closeConn() error {
+	if c.conn == nil {
+		return nil
+	}
+	err := c.conn.Close()
+	c.conn = nil
+	c.client = nil
+	return err
+}
+
+func (c *GRPCClient) nextTarget() string {
+	targets := c.cfg.GRPCTargets()
+	if len(targets) == 0 {
+		return ""
+	}
+	target := targets[c.targetIdx%len(targets)]
+	c.targetIdx = (c.targetIdx + 1) % len(targets)
+	return target
+}
+
+func (c *GRPCClient) preflight(ctx context.Context) {
+	healthURLs := c.cfg.HealthCheckURLs()
+	for _, item := range healthURLs {
+		reqCtx, cancel := context.WithTimeout(ctx, c.cfg.HealthCheckTimeout)
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, item, nil)
+		if err != nil {
+			cancel()
+			continue
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+				log.Debug().Str("url", item).Int("status_code", resp.StatusCode).Msg("control plane health check completed")
+				loggingx.New("agent").Debug(log.Logger, "control-plane-health", c.cfg.ServerID, "reachable", map[string]any{
+					"url":         loggingx.NormalizeURL(item),
+					"status_code": resp.StatusCode,
+				})
+				cancel()
+				return
+			}
+		}
+		cancel()
+	}
+
+	targets := c.cfg.GRPCTargets()
+	for _, target := range targets {
+		conn, err := net.DialTimeout("tcp", target, c.cfg.ConnectTimeout)
+		if err == nil {
+			_ = conn.Close()
+			loggingx.New("agent").Debug(log.Logger, "grpc-preflight", c.cfg.ServerID, "reachable", map[string]any{
+				"target": target,
+			})
+			return
+		}
+	}
+
+	loggingx.New("agent").Warn(log.Logger, "grpc-preflight", c.cfg.ServerID, "retrying", map[string]any{
+		"control_plane_urls": c.cfg.ControlPlaneURLs,
+		"grpc_targets":       targets,
+	})
+}
+
+func (c *GRPCClient) backoff(attempt int) time.Duration {
+	delay := c.cfg.BackoffInitial
+	for i := 0; i < attempt; i++ {
+		delay *= 2
+		if delay >= c.cfg.BackoffMax {
+			delay = c.cfg.BackoffMax
+			break
+		}
+	}
+	if delay > c.cfg.BackoffMax {
+		delay = c.cfg.BackoffMax
+	}
+	jitterMax := delay / 5
+	if jitterMax <= 0 {
+		return delay
+	}
+	return delay + time.Duration(rand.Int63n(int64(jitterMax)))
 }
 
 func (c *GRPCClient) handleControlMessage(msg *agentpb.ControlMessage) {
@@ -186,7 +335,9 @@ func (c *GRPCClient) handleControlMessage(msg *agentpb.ControlMessage) {
 	case *agentpb.ControlMessage_ListServices:
 		go c.handleListServices(msg.MessageId, p.ListServices)
 	default:
-		log.Printf("[agent] unknown control message: %v", p)
+		loggingx.New("agent").Warn(log.Logger, "control-message", c.cfg.ServerID, "unknown", map[string]any{
+			"payload_type": fmt.Sprintf("%T", p),
+		})
 	}
 }
 
@@ -212,17 +363,40 @@ func (c *GRPCClient) handleTriggerSkill(msgID string, req *agentpb.TriggerSkill)
 }
 
 func (c *GRPCClient) handleControlOperation(msgID string, req *agentpb.TriggerSkill) {
-	operation := req.Context["operation"]
-	timeout := 300 * time.Second
-	if rawTimeout := req.Context["timeout_s"]; rawTimeout != "" {
-		if seconds, err := time.ParseDuration(rawTimeout + "s"); err == nil && seconds > 0 {
-			timeout = seconds
+	payload := agent.ControlOperationPayload{
+		CommandID: msgID,
+		Operation: req.Context["operation"],
+		TimeoutS:  300,
+		Params:    map[string]any{},
+	}
+	if raw := req.Context["payload_json"]; raw != "" {
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			c.SendEvent(&agentpb.AgentEvent{
+				Payload: &agentpb.AgentEvent_SkillResult{
+					SkillResult: &agentpb.SkillExecutionResult{
+						TaskId:      msgID,
+						SkillName:   req.SkillName,
+						ExitCode:    1,
+						ErrorReason: "invalid payload_json: " + err.Error(),
+					},
+				},
+			})
+			return
 		}
 	}
-
-	params := map[string]any{}
-	if raw := req.Context["params_json"]; raw != "" {
-		if err := json.Unmarshal([]byte(raw), &params); err != nil {
+	if payload.CommandID == "" {
+		payload.CommandID = msgID
+	}
+	if rawTimeout := req.Context["timeout_s"]; rawTimeout != "" {
+		if seconds, err := time.ParseDuration(rawTimeout + "s"); err == nil && seconds > 0 {
+			payload.TimeoutS = int(seconds.Seconds())
+		}
+	}
+	if payload.TimeoutS <= 0 {
+		payload.TimeoutS = 300
+	}
+	if raw := req.Context["params_json"]; raw != "" && len(payload.Params) == 0 {
+		if err := json.Unmarshal([]byte(raw), &payload.Params); err != nil {
 			c.SendEvent(&agentpb.AgentEvent{
 				Payload: &agentpb.AgentEvent_SkillResult{
 					SkillResult: &agentpb.SkillExecutionResult{
@@ -237,11 +411,11 @@ func (c *GRPCClient) handleControlOperation(msgID string, req *agentpb.TriggerSk
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(payload.TimeoutS)*time.Second)
 	defer cancel()
 
 	start := time.Now()
-	output, exitCode, err := c.controlExecutor.Execute(ctx, operation, params)
+	output, exitCode, err := c.controlExecutor.ExecutePayload(ctx, payload)
 	if output != "" {
 		c.sendStructuredOperationOutput(msgID, output)
 	}
@@ -267,7 +441,11 @@ func (c *GRPCClient) handleControlOperation(msgID string, req *agentpb.TriggerSk
 }
 
 func (c *GRPCClient) handleServiceAction(msgID string, req *agentpb.ServiceAction) {
-	log.Printf("[agent] service action [%s]: %s on %q", msgID, req.Action, req.ServiceName)
+	loggingx.New("agent").Info(log.Logger, "service-action", c.cfg.ServerID, "running", map[string]any{
+		"task_id": msgID,
+		"action":  req.Action,
+		"service": req.ServiceName,
+	})
 
 	err := c.serviceExecutor.PerformAction(context.Background(), req.ServiceName, executor.ServiceAction(req.Action))
 
@@ -290,11 +468,17 @@ func (c *GRPCClient) handleServiceAction(msgID string, req *agentpb.ServiceActio
 }
 
 func (c *GRPCClient) handleListServices(msgID string, req *agentpb.ListServices) {
-	log.Printf("[agent] listing services [%s] (pattern: %q)", msgID, req.FilterPattern)
+	loggingx.New("agent").Info(log.Logger, "service-list", c.cfg.ServerID, "running", map[string]any{
+		"task_id": msgID,
+		"pattern": req.FilterPattern,
+	})
 
 	services, err := c.serviceExecutor.ListServices(context.Background())
 	if err != nil {
-		log.Printf("[agent] failed to list services: %v", err)
+		loggingx.New("agent").Error(log.Logger, "service-list", c.cfg.ServerID, "error", map[string]any{
+			"task_id": msgID,
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -319,7 +503,9 @@ func (c *GRPCClient) handleListServices(msgID string, req *agentpb.ListServices)
 }
 
 func (c *GRPCClient) executeTask(task *agentpb.ExecuteTask) {
-	log.Printf("[agent] executing task [%s]: %q", task.TaskId, task.Cmd)
+	loggingx.New("agent").Info(log.Logger, "task-execute", c.cfg.ServerID, "running", map[string]any{
+		"task_id": task.TaskId,
+	})
 
 	timeout := time.Duration(task.TimeoutS) * time.Second
 	if timeout == 0 {
@@ -329,7 +515,6 @@ func (c *GRPCClient) executeTask(task *agentpb.ExecuteTask) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Track task
 	c.tasksMu.Lock()
 	c.tasks[task.TaskId] = cancel
 	c.tasksMu.Unlock()
@@ -394,8 +579,8 @@ func (c *GRPCClient) executeTask(task *agentpb.ExecuteTask) {
 	}()
 
 	exitCode, err := c.cmdExecutor.ExecuteCommand(ctx, task.Cmd, pw, ew)
-	pw.Close()
-	ew.Close()
+	_ = pw.Close()
+	_ = ew.Close()
 	wg.Wait()
 
 	durationMs := time.Since(start).Milliseconds()
@@ -415,7 +600,11 @@ func (c *GRPCClient) executeTask(task *agentpb.ExecuteTask) {
 		},
 	})
 
-	log.Printf("[agent] task [%s] done (exit=%d)", task.TaskId, exitCode)
+	loggingx.New("agent").Info(log.Logger, "task-execute", c.cfg.ServerID, "finished", map[string]any{
+		"task_id":     task.TaskId,
+		"exit_code":   exitCode,
+		"duration_ms": durationMs,
+	})
 }
 
 func (c *GRPCClient) cancelTask(taskID string) {
@@ -424,7 +613,9 @@ func (c *GRPCClient) cancelTask(taskID string) {
 	c.tasksMu.Unlock()
 
 	if ok && cancel != nil {
-		log.Printf("[agent] canceling task [%s]", taskID)
+		loggingx.New("agent").Info(log.Logger, "task-cancel", c.cfg.ServerID, "canceling", map[string]any{
+			"task_id": taskID,
+		})
 		cancel()
 	}
 }
@@ -463,19 +654,6 @@ func (c *GRPCClient) sendStructuredOperationOutput(taskID, output string) {
 		return
 	}
 	c.sendChunkedOutput(taskID, output, false)
-}
-
-func (c *GRPCClient) heartbeatLoop() {
-	ticker := time.NewTicker(10 * time.Second)
-	for range ticker.C {
-		c.SendEvent(&agentpb.AgentEvent{
-			Payload: &agentpb.AgentEvent_Heartbeat{
-				Heartbeat: &agentpb.Heartbeat{
-					TimestampMs: time.Now().UnixMilli(),
-				},
-			},
-		})
-	}
 }
 
 func sleepWithContext(ctx context.Context, delay time.Duration) bool {

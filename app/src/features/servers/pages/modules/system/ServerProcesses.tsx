@@ -1,69 +1,135 @@
-import { useState, useEffect } from "react";
-import { mockSecurityService } from "../shared/mockServerService";
-import { RefreshCw, XCircle, Activity } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import { Activity, RefreshCw, Search, XCircle } from "lucide-react";
+
+import { useNotification } from "@/core/NotificationContext";
+import { processApi, serversApi, terminalApi } from "@/shared/api/client";
 import { Button } from "@/shared/ui/Button";
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/shared/ui/Table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/Table";
+
+type ProcessRow = {
+  pid: number;
+  user: string;
+  cpu: number;
+  mem: number;
+  command: string;
+};
 
 export default function ServerProcesses() {
-  const [processes, setProcesses] = useState<any[]>([]);
+  const { serverId = "" } = useParams();
+  const { showNotification } = useNotification();
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadProcesses();
-  }, []);
+  const [serverOS, setServerOS] = useState<string>("linux");
+  const [processes, setProcesses] = useState<ProcessRow[]>([]);
+  const [search, setSearch] = useState("");
 
   const loadProcesses = async () => {
+    if (!serverId) return;
     setLoading(true);
     try {
-      // Accessing the new method from mockSecurityService which we added to mockServerService actually in the previous step
-      // But since we extended mockServerService, we should use that or cast it.
-      // Correction: The update was made to mockSecurityService's parent file but attached to `mockSecurityService` object?
-      // Re-checking the previous tool call...
-      // It was added to `mockSecurityService` object in `mockServerService.ts`?
-      // Wait, I see I modified the END of the file `mockServerService.ts`.
-      // The object I modified was likely `mockSecurityService` because the previous context was adding alerts to it.
-      // Actually, looking at the file `mockServerService.ts`, `mockSecurityService` is at the end.
-      // However, `getProcesses` is more of a generic server thing.
-      // Let's assume I appended it to `mockSecurityService` for now since that's where I sent the edit.
-      // I will use `mockSecurityService` to call `getProcesses`.
-      const data = await (mockSecurityService as any).getProcesses();
-      setProcesses(data);
+      const server = await serversApi.get(serverId);
+      setServerOS(server.os);
+      if (server.os !== "linux") {
+        setProcesses([]);
+        return;
+      }
+
+      const response = await terminalApi.exec(serverId, {
+        command: "ps -eo pid,user,pcpu,pmem,command --sort=-pcpu | head -n 251",
+        timeout_sec: 20,
+      });
+      const output = String(response.raw_output ?? "");
+      setProcesses(parsePsOutput(output));
+    } catch (error) {
+      showNotification({
+        type: "error",
+        message: "Unable to load processes",
+        description: error instanceof Error ? error.message : "Request failed.",
+      });
     } finally {
       setLoading(false);
     }
   };
 
+  const filteredProcesses = processes.filter((proc) => {
+    const normalized = search.trim().toLowerCase();
+    if (!normalized) return true;
+    return (
+      String(proc.pid).includes(normalized) ||
+      proc.user.toLowerCase().includes(normalized) ||
+      proc.command.toLowerCase().includes(normalized)
+    );
+  });
+
+  useEffect(() => {
+    void loadProcesses();
+  }, [serverId]);
+
+  const handleKill = async (pid: number) => {
+    if (!serverId) return;
+    try {
+      await processApi.signal(serverId, { pid, signal: "TERM" });
+      showNotification({
+        type: "success",
+        message: "Signal sent",
+        description: `TERM dispatched to PID ${pid}.`,
+      });
+      await loadProcesses();
+    } catch (error) {
+      showNotification({
+        type: "error",
+        message: "Unable to stop process",
+        description: error instanceof Error ? error.message : "Request failed.",
+      });
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 flex items-center gap-2">
-            <div className="p-2 bg-purple-50 dark:bg-purple-500/10 rounded-lg border border-purple-100/50 dark:border-purple-500/20">
+          <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+            <div className="rounded-lg border border-purple-100/50 bg-purple-50 p-2 dark:border-purple-500/20 dark:bg-purple-500/10">
               <Activity className="text-purple-500" size={20} />
             </div>
             Process Management
           </h2>
-          <p className="text-zinc-500 dark:text-zinc-400 text-[13px] mt-2">
-            Monitor and control actively running processes on the server.
+          <p className="mt-2 text-[13px] text-zinc-500 dark:text-zinc-400">
+            Real process snapshot via terminal exec. Signal action is wired to the typed process API.
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={loadProcesses}
-          className="flex items-center gap-2"
-          disabled={loading}
-        >
+        <Button variant="outline" onClick={() => void loadProcesses()} className="flex items-center gap-2" disabled={loading}>
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           Refresh Snapshot
         </Button>
       </div>
 
-      <div className="bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl overflow-hidden shadow-sm transition-all">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative max-w-md flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={15} />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search by PID, user, command, or port text..."
+            className="h-10 w-full rounded-xl border border-zinc-200 bg-white pl-10 pr-3 text-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+          />
+        </div>
+        <div className="text-xs font-medium text-zinc-500">
+          {filteredProcesses.length} / {processes.length} process{processes.length === 1 ? "" : "es"}
+        </div>
+      </div>
+
+      {serverOS !== "linux" ? (
+        <div className="rounded-xl border border-amber-200/60 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900/30 dark:bg-amber-900/10 dark:text-amber-300">
+          Process inventory currently uses the Linux `ps` path. This server is `{serverOS}`, so only signal actions are available from API today.
+        </div>
+      ) : null}
+
+      <div className="overflow-hidden rounded-xl border border-zinc-200/60 bg-white shadow-sm transition-all dark:border-zinc-800/60 dark:bg-[#121212]">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>PID</TableHead>
-              <TableHead>Port</TableHead>
               <TableHead>User</TableHead>
               <TableHead>Command</TableHead>
               <TableHead>CPU %</TableHead>
@@ -73,69 +139,41 @@ export default function ServerProcesses() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              [...Array(5)].map((_, i) => (
-                  <TableRow key={i}>
-                      <TableCell><div className="h-4 w-12 bg-zinc-200 dark:bg-zinc-800 rounded-md animate-pulse" /></TableCell>
-                      <TableCell><div className="h-4 w-16 bg-zinc-200 dark:bg-zinc-800 rounded-md animate-pulse" /></TableCell>
-                      <TableCell><div className="h-4 w-20 bg-zinc-200 dark:bg-zinc-800 rounded-md animate-pulse" /></TableCell>
-                      <TableCell><div className="h-4 w-48 bg-zinc-200 dark:bg-zinc-800 rounded-md animate-pulse" /></TableCell>
-                      <TableCell><div className="h-4 w-10 bg-zinc-200 dark:bg-zinc-800 rounded-md animate-pulse" /></TableCell>
-                      <TableCell><div className="h-4 w-10 bg-zinc-200 dark:bg-zinc-800 rounded-md animate-pulse" /></TableCell>
-                      <TableCell><div className="h-6 w-16 bg-zinc-200 dark:bg-zinc-800 rounded-md animate-pulse ml-auto" /></TableCell>
-                  </TableRow>
-              ))
-            ) : processes.length === 0 ? (
-                <TableRow>
-                    <TableCell colSpan={7} className="h-48 text-center">
-                        <div className="flex flex-col items-center justify-center text-zinc-500 dark:text-zinc-400">
-                            <Activity size={32} className="mb-3 opacity-20" />
-                            <p className="text-[13px] font-medium">No processes found.</p>
-                        </div>
-                    </TableCell>
+              [...Array(5)].map((_, index) => (
+                <TableRow key={index}>
+                  <TableCell><div className="h-4 w-12 animate-pulse rounded-md bg-zinc-200 dark:bg-zinc-800" /></TableCell>
+                  <TableCell><div className="h-4 w-20 animate-pulse rounded-md bg-zinc-200 dark:bg-zinc-800" /></TableCell>
+                  <TableCell><div className="h-4 w-48 animate-pulse rounded-md bg-zinc-200 dark:bg-zinc-800" /></TableCell>
+                  <TableCell><div className="h-4 w-10 animate-pulse rounded-md bg-zinc-200 dark:bg-zinc-800" /></TableCell>
+                  <TableCell><div className="h-4 w-10 animate-pulse rounded-md bg-zinc-200 dark:bg-zinc-800" /></TableCell>
+                  <TableCell><div className="ml-auto h-6 w-16 animate-pulse rounded-md bg-zinc-200 dark:bg-zinc-800" /></TableCell>
                 </TableRow>
+              ))
+            ) : filteredProcesses.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="h-48 text-center">
+                  <div className="flex flex-col items-center justify-center text-zinc-500 dark:text-zinc-400">
+                    <Activity size={32} className="mb-3 opacity-20" />
+                    <p className="text-[13px] font-medium">{processes.length === 0 ? "No processes found." : "No process matches your search."}</p>
+                  </div>
+                </TableCell>
+              </TableRow>
             ) : (
-              processes.map((proc) => (
+              filteredProcesses.map((proc) => (
                 <TableRow key={proc.pid} className="group">
-                  <TableCell className="font-mono text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                    {proc.pid}
-                  </TableCell>
-                  <TableCell>
-                    {proc.ports && proc.ports.length > 0 ? (
-                      <div className="flex gap-1.5 flex-wrap">
-                        {proc.ports.map((port: number) => (
-                          <span
-                            key={port}
-                            className="px-1.5 py-0.5 bg-blue-50 dark:bg-blue-500/10 border border-blue-100/50 dark:border-blue-500/20 text-blue-600 dark:text-blue-400 text-[11px] font-mono font-bold rounded-md shadow-sm"
-                          >
-                            {port}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-zinc-400 dark:text-zinc-600 text-[12px]">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-[13px] text-zinc-900 dark:text-zinc-100 font-medium">{proc.user}</TableCell>
+                  <TableCell className="font-mono text-xs font-medium text-zinc-500 dark:text-zinc-400">{proc.pid}</TableCell>
+                  <TableCell className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">{proc.user}</TableCell>
                   <TableCell className="text-[12px] font-mono text-zinc-600 dark:text-zinc-300">
-                    <div className="max-w-xs truncate" title={proc.command}>
-                      {proc.command}
-                    </div>
+                    <div className="max-w-xs truncate" title={proc.command}>{proc.command}</div>
                   </TableCell>
-                  <TableCell>
-                    <span className={`text-[13px] font-bold ${proc.cpu > 80 ? 'text-red-500 dark:text-red-400' : proc.cpu > 50 ? 'text-amber-500 dark:text-amber-400' : 'text-zinc-600 dark:text-zinc-300'}`}>
-                        {proc.cpu}%
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span className={`text-[13px] font-bold ${proc.mem > 80 ? 'text-red-500 dark:text-red-400' : proc.mem > 50 ? 'text-amber-500 dark:text-amber-400' : 'text-zinc-600 dark:text-zinc-300'}`}>
-                        {proc.mem}%
-                    </span>
-                  </TableCell>
+                  <TableCell><UsageText value={proc.cpu} /></TableCell>
+                  <TableCell><UsageText value={proc.mem} /></TableCell>
                   <TableCell className="text-right">
                     <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100 transition-opacity ml-auto"
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto text-red-500 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 dark:text-red-400 dark:hover:bg-red-900/20"
+                      onClick={() => void handleKill(proc.pid)}
                     >
                       <XCircle size={14} className="mr-1.5" /> Kill
                     </Button>
@@ -148,4 +186,29 @@ export default function ServerProcesses() {
       </div>
     </div>
   );
+}
+
+function UsageText({ value }: { value: number }) {
+  const tone =
+    value > 80 ? "text-red-500 dark:text-red-400" : value > 50 ? "text-amber-500 dark:text-amber-400" : "text-zinc-600 dark:text-zinc-300";
+  return <span className={`text-[13px] font-bold ${tone}`}>{value}%</span>;
+}
+
+function parsePsOutput(output: string): ProcessRow[] {
+  return output
+    .split(/\r?\n/)
+    .slice(1)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split(/\s+/, 5);
+      return {
+        pid: Number.parseInt(parts[0] ?? "0", 10),
+        user: parts[1] ?? "-",
+        cpu: Number.parseFloat(parts[2] ?? "0"),
+        mem: Number.parseFloat(parts[3] ?? "0"),
+        command: parts[4] ?? "",
+      };
+    })
+    .filter((item) => Number.isFinite(item.pid) && item.pid > 0);
 }

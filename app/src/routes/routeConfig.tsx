@@ -124,6 +124,9 @@ const ServerAuditLogs = lazy(
 const ServerProcesses = lazy(
   () => import("@/features/servers/pages/modules/system/ServerProcesses"),
 );
+const ServerTerminal = lazy(
+  () => import("@/features/servers/pages/modules/system/ServerTerminal"),
+);
 const ServerNetwork = lazy(
   () => import("@/features/servers/pages/modules/network/ServerNetwork"),
 );
@@ -233,6 +236,10 @@ export const routes: RouteObject[] = [
       {
         path: "system/processes",
         element: React.createElement(ServerProcesses),
+      },
+      {
+        path: "system/terminal",
+        element: React.createElement(ServerTerminal),
       },
 
       // Access

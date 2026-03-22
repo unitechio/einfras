@@ -110,13 +110,61 @@ func TestControlExecutorRejectsPathOutsideAllowedRoots(t *testing.T) {
 	}
 }
 
+func TestControlExecutorRejectsTenantMismatch(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(dir)
+	cfg.TenantID = "tenant-a"
+	exec := NewControlExecutor(cfg)
+
+	_, code, err := exec.ExecutePayload(context.Background(), agent.ControlOperationPayload{
+		Operation:          "plugin.capabilities",
+		TenantID:           "tenant-b",
+		RequiredCapability: "control-operation",
+		ActorRole:          "admin",
+	})
+	if err == nil || code == 0 {
+		t.Fatalf("expected tenant mismatch rejection")
+	}
+}
+
+func TestControlExecutorAllowsTenantScopedOperation(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(dir)
+	cfg.TenantID = "tenant-a"
+	cfg.GroupOperationRoles = map[string]map[string]map[string]struct{}{
+		"ops": {
+			"plugin.capabilities": {"admin": {}},
+		},
+	}
+	exec := NewControlExecutor(cfg)
+
+	out, code, err := exec.ExecutePayload(context.Background(), agent.ControlOperationPayload{
+		Operation:          "plugin.capabilities",
+		TenantID:           "tenant-a",
+		ServerGroups:       []string{"ops"},
+		RequiredCapability: "control-operation",
+		ActorRole:          "admin",
+	})
+	if err != nil || code != 0 {
+		t.Fatalf("expected allowed operation, got code=%d err=%v", code, err)
+	}
+	if !strings.Contains(out, "plugin.capabilities") {
+		t.Fatalf("unexpected output: %s", out)
+	}
+}
+
 func testConfig(root string) *config.Config {
 	return &config.Config{
-		AllowedReadRoots:  []string{root},
-		AllowedWriteRoots: []string{root},
-		PluginRoot:        filepath.Join(root, "plugins"),
-		MaxReadBytes:      1024 * 1024,
-		StreamChunkBytes:  1024,
-		MaxTailLines:      500,
+		AllowedReadRoots:    []string{root},
+		AllowedWriteRoots:   []string{root},
+		PluginRoot:          filepath.Join(root, "plugins"),
+		MaxReadBytes:        1024 * 1024,
+		StreamChunkBytes:    1024,
+		MaxTailLines:        500,
+		TenantAllowlist:     map[string]struct{}{},
+		TenantDenylist:      map[string]struct{}{},
+		GroupAllowlist:      map[string]struct{}{},
+		GroupDenylist:       map[string]struct{}{},
+		GroupOperationRoles: map[string]map[string]map[string]struct{}{},
 	}
 }

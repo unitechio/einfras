@@ -1,587 +1,519 @@
 import {
-  X,
+  ArrowRight,
+  CheckCircle2,
   Globe,
   HardDrive,
+  Loader2,
   Network,
   Search,
-  ArrowRight,
-  Download,
-  Upload,
-  FileCode,
-  CheckCircle2,
-  Terminal,
   ShieldCheck,
-  Cpu,
-  Disc,
+  Sparkles,
+  Terminal,
+  Upload,
+  X,
 } from "lucide-react";
-import { useState, useEffect } from "react";
-import {
-  mockServerService,
-} from "../shared/mockServerService";
-import type {
-  InstallMode,
-  ServicePackage,
-  ServiceTemplate,
-  DryRunResult,
-  InstallLog,
-} from "../shared/mockServerService";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+
+import { useNotification } from "@/core/NotificationContext";
 import { cn } from "@/lib/utils";
+import { packagesApi, serversApi, servicesApi, terminalApi } from "@/shared/api/client";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 
 interface AddServiceWizardProps {
   isOpen: boolean;
   onClose: () => void;
+  serverId: string;
+  onInstalled?: () => void | Promise<void>;
 }
 
-type Step = "mode" | "package" | "config" | "review" | "install";
+type InstallMode = "public" | "private" | "relay";
+type Step = "mode" | "package" | "review" | "result";
 
-export function AddServiceWizard({ isOpen, onClose }: AddServiceWizardProps) {
+type PackageCandidate = {
+  name: string;
+  description: string;
+  source: "installed" | "repository";
+};
+
+export function AddServiceWizard({
+  isOpen,
+  onClose,
+  serverId,
+  onInstalled,
+}: AddServiceWizardProps) {
+  const { showNotification } = useNotification();
   const [step, setStep] = useState<Step>("mode");
   const [mode, setMode] = useState<InstallMode | null>(null);
-  const [selectedPackage, setSelectedPackage] = useState<ServicePackage | null>(
-    null,
-  );
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<ServicePackage[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [template, setTemplate] = useState<ServiceTemplate | null>(null);
-  const [config, setConfig] = useState<Record<string, any>>({});
-  const [dryRun, setDryRun] = useState<DryRunResult | null>(null);
-  const [installLogs, setInstallLogs] = useState<InstallLog[]>([]);
-  const [installStatus, setInstallStatus] = useState<
-    "idle" | "installing" | "completed"
-  >("idle");
+  const [serverOS, setServerOS] = useState("linux");
+  const [query, setQuery] = useState("");
+  const [selectedPackage, setSelectedPackage] = useState("");
+  const [packageResults, setPackageResults] = useState<PackageCandidate[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [resultMessage, setResultMessage] = useState<string>("");
 
-  // Reset when closed
   useEffect(() => {
     if (!isOpen) {
-      setTimeout(() => {
+      window.setTimeout(() => {
         setStep("mode");
         setMode(null);
-        setSelectedPackage(null);
-        setTemplate(null);
-        setConfig({});
-        setDryRun(null);
-        setInstallLogs([]);
-        setInstallStatus("idle");
-      }, 300);
+        setQuery("");
+        setSelectedPackage("");
+        setPackageResults([]);
+        setResultMessage("");
+      }, 200);
     }
   }, [isOpen]);
 
-  // Search packages
   useEffect(() => {
-    if (step === "package" && mode === "public") {
-      const delay = setTimeout(async () => {
-        setIsSearching(true);
-        const results = await mockServerService.searchPackages(searchQuery);
-        setSearchResults(results);
-        setIsSearching(false);
-      }, 500);
-      return () => clearTimeout(delay);
-    }
-  }, [searchQuery, step, mode]);
+    if (!isOpen || !serverId) return;
+    void serversApi
+      .get(serverId)
+      .then((server) => setServerOS(server.os || "linux"))
+      .catch(() => setServerOS("linux"));
+  }, [isOpen, serverId]);
 
-  // Fetch template when package selected
   useEffect(() => {
-    if (selectedPackage) {
-      mockServerService.getTemplate(selectedPackage.name).then((t) => {
-        setTemplate(t);
-        // Set defaults
-        const defaults: Record<string, any> = {};
-        t.configFields.forEach((f) => {
-          if (f.defaultValue !== undefined) defaults[f.key] = f.defaultValue;
-        });
-        setConfig(defaults);
+    let cancelled = false;
+    if (!isOpen || step !== "package" || mode !== "public") return;
+
+    const keyword = query.trim();
+    if (keyword.length < 2) {
+      setPackageResults([]);
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const [installed, lookup] = await Promise.all([
+          packagesApi.list(serverId).catch(() => ({ result: { data: [] as Array<{ name: string }> } })),
+          terminalApi
+            .exec(serverId, {
+              command: `sh -lc "if command -v apt-cache >/dev/null 2>&1; then apt-cache search --names-only '${escapeSingleQuotes(keyword)}' | head -n 12; elif command -v dnf >/dev/null 2>&1; then dnf search '${escapeSingleQuotes(keyword)}' | head -n 12; elif command -v yum >/dev/null 2>&1; then yum search '${escapeSingleQuotes(keyword)}' | head -n 12; else true; fi"`,
+              timeout_sec: 20,
+            })
+            .catch(() => ({ raw_output: "" })),
+        ]);
+
+        if (cancelled) return;
+
+        const installedItems = Array.isArray(installed.result?.data)
+          ? installed.result.data
+              .filter((item) => String(item.name ?? "").toLowerCase().includes(keyword.toLowerCase()))
+              .slice(0, 8)
+              .map((item) => ({
+                name: String(item.name),
+                description: "Installed package on this node",
+                source: "installed" as const,
+              }))
+          : [];
+
+        const repoItems = parsePackageSearch(String(lookup.raw_output ?? ""));
+        const merged = dedupePackages([...installedItems, ...repoItems]).slice(0, 12);
+        setPackageResults(merged);
+      } finally {
+        if (!cancelled) {
+          setSearching(false);
+        }
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isOpen, step, mode, query, serverId]);
+
+  const canInstallPublic = mode === "public" && selectedPackage.trim().length > 0;
+  const guidance = useMemo(() => {
+    if (mode === "private") {
+      return {
+        title: "Private Upload",
+        lines: [
+          "Upload .deb, .rpm, or .tar.gz is planned for the next backend slice.",
+          "Use Package Management for official repositories first, or copy artifacts to the node and install through Terminal as a temporary workaround.",
+          "Recommended for air-gapped systems once upload API and checksum validation land.",
+        ],
+      };
+    }
+    if (mode === "relay") {
+      return {
+        title: "Relay / Bastion Install",
+        lines: [
+          "Relay-based service installation still needs a dedicated backend workflow.",
+          "Current recommendation: onboard the bastion as a server node first, then run package install on the target through your approved jump flow.",
+          "Security scanning and bastion proxy orchestration will be added when relay endpoints are ready.",
+        ],
+      };
+    }
+    return null;
+  }, [mode]);
+
+  const handlePublicInstall = async () => {
+    if (!serverId || !selectedPackage.trim()) return;
+    setInstalling(true);
+    setStep("result");
+    try {
+      await packagesApi.action(serverId, {
+        action: "install",
+        package_name: selectedPackage.trim(),
       });
+      setDiscoveryLoading(true);
+      try {
+        await servicesApi.discovery(serverId);
+      } catch {
+        // discovery can lag or be unsupported on some nodes; install still succeeded
+      } finally {
+        setDiscoveryLoading(false);
+      }
+
+      setResultMessage(
+        `Package ${selectedPackage.trim()} was dispatched successfully. We also triggered service discovery so the Services list can refresh with any new system unit.`,
+      );
+      showNotification({
+        type: "success",
+        message: "Service install dispatched",
+        description: `${selectedPackage.trim()} has been installed through the real package workflow.`,
+      });
+      await onInstalled?.();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Request failed.";
+      setResultMessage(message);
+      showNotification({
+        type: "error",
+        message: "Unable to install service",
+        description: message,
+      });
+    } finally {
+      setInstalling(false);
     }
-  }, [selectedPackage]);
-
-  const handleRunDryRun = async () => {
-    if (!selectedPackage || !template) return;
-    setStep("review");
-    const result = await mockServerService.simulateDryRun(
-      selectedPackage,
-      config,
-    );
-    setDryRun(result);
-  };
-
-  const handleInstall = async () => {
-    if (!selectedPackage) return;
-    setStep("install");
-    setInstallStatus("installing");
-
-    await mockServerService.installService(selectedPackage, config, (log) => {
-      setInstallLogs((prev) => [...prev, log]);
-    });
-
-    setInstallStatus("completed");
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-4xl bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col h-[600px] animate-in zoom-in-95 duration-200">
-        {/* Header */}
-        <div className="px-6 py-5 border-b border-zinc-200/60 dark:border-zinc-800/60 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-800/10">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div className="flex h-[680px] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex items-start justify-between border-b border-zinc-200/70 bg-zinc-50/80 px-6 py-5 dark:border-zinc-800/70 dark:bg-zinc-800/15">
           <div>
-            <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white">
-              Add New Service
-            </h2>
-            <div className="flex items-center gap-2.5 text-[11px] font-bold uppercase tracking-wider text-zinc-500 mt-2">
-              <span
-                className={cn(
-                  "flex items-center gap-1.5",
-                  step === "mode" && "text-blue-600 dark:text-blue-400",
-                )}
-              >
-                1. Mode
-              </span>
-              <ArrowRight size={12} className="opacity-50" />
-              <span
-                className={cn(
-                  "flex items-center gap-1.5",
-                  step === "package" && "text-blue-600 dark:text-blue-400",
-                )}
-              >
-                2. Package
-              </span>
-              <ArrowRight size={12} className="opacity-50" />
-              <span
-                className={cn(
-                  "flex items-center gap-1.5",
-                  step === "config" && "text-blue-600 dark:text-blue-400",
-                )}
-              >
-                3. Configure
-              </span>
-              <ArrowRight size={12} className="opacity-50" />
-              <span
-                className={cn(
-                  "flex items-center gap-1.5",
-                  step === "review" && "text-blue-600 dark:text-blue-400",
-                )}
-              >
-                4. Review
-              </span>
-              <ArrowRight size={12} className="opacity-50" />
-              <span
-                className={cn(
-                  "flex items-center gap-1.5",
-                  step === "install" && "text-blue-600 dark:text-blue-400",
-                )}
-              >
-                5. Install
-              </span>
+            <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white">Add New Service</h2>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+              {["mode", "package", "review", "result"].map((item) => (
+                <span
+                  key={item}
+                  className={cn(
+                    "rounded-full px-2 py-1",
+                    step === item ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "bg-zinc-100 dark:bg-zinc-800",
+                  )}
+                >
+                  {item}
+                </span>
+              ))}
             </div>
           </div>
-          {installStatus !== "installing" && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onClose}
-              className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-            >
-              <X size={20} />
+          {!installing ? (
+            <Button variant="ghost" size="icon" onClick={onClose}>
+              <X size={18} />
             </Button>
-          )}
+          ) : null}
         </div>
 
-        {/* Content */}
-        <div className="flex-1 p-6 overflow-y-auto">
-          {step === "mode" && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
-              <button
+        <div className="flex-1 overflow-y-auto p-6">
+          {step === "mode" ? (
+            <div className="grid h-full grid-cols-1 gap-4 md:grid-cols-3">
+              <ModeCard
+                icon={<Globe size={30} />}
+                title="Public Registry"
+                description="Install standard packages from official repositories like apt, yum, or dnf."
+                accent="blue"
                 onClick={() => {
                   setMode("public");
                   setStep("package");
                 }}
-                className="flex flex-col items-center justify-center p-6 rounded-xl border-2 border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all group text-center"
-              >
-                <div className="p-4 bg-blue-100 dark:bg-blue-900/30 rounded-full text-blue-600 dark:text-blue-400 mb-4 group-hover:scale-110 transition-transform">
-                  <Globe size={32} />
-                </div>
-                <h3 className="font-bold text-lg mb-2">Public Registry</h3>
-                <p className="text-sm text-zinc-500">
-                  Install standard packages from official repositories
-                  (Official, apt, yum).
-                </p>
-              </button>
-              <button
+              />
+              <ModeCard
+                icon={<HardDrive size={30} />}
+                title="Private Upload"
+                description="Upload .deb, .rpm, or .tar.gz packages for air-gapped environments."
+                accent="purple"
                 onClick={() => {
                   setMode("private");
-                  setStep("package");
+                  setStep("review");
                 }}
-                className="flex flex-col items-center justify-center p-6 rounded-xl border-2 border-zinc-200 dark:border-zinc-800 hover:border-purple-500 dark:hover:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/10 transition-all group text-center"
-              >
-                <div className="p-4 bg-purple-100 dark:bg-purple-900/30 rounded-full text-purple-600 dark:text-purple-400 mb-4 group-hover:scale-110 transition-transform">
-                  <HardDrive size={32} />
-                </div>
-                <h3 className="font-bold text-lg mb-2">Private Upload</h3>
-                <p className="text-sm text-zinc-500">
-                  Upload .deb, .rpm, or .tar.gz files directly for air-gapped
-                  systems.
-                </p>
-              </button>
-              <button
+              />
+              <ModeCard
+                icon={<Network size={30} />}
+                title="Relay Server"
+                description="Proxy installation through a bastion or relay path with extra controls."
+                accent="amber"
                 onClick={() => {
                   setMode("relay");
-                  setStep("package");
+                  setStep("review");
                 }}
-                className="flex flex-col items-center justify-center p-6 rounded-xl border-2 border-zinc-200 dark:border-zinc-800 hover:border-amber-500 dark:hover:border-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/10 transition-all group text-center"
-              >
-                <div className="p-4 bg-amber-100 dark:bg-amber-900/30 rounded-full text-amber-600 dark:text-amber-400 mb-4 group-hover:scale-110 transition-transform">
-                  <Network size={32} />
-                </div>
-                <h3 className="font-bold text-lg mb-2">Relay Server</h3>
-                <p className="text-sm text-zinc-500">
-                  Proxy installation through a bastion server with security
-                  scanning.
-                </p>
-              </button>
+              />
             </div>
-          )}
+          ) : null}
 
-          {step === "package" && (
+          {step === "package" && mode === "public" ? (
             <div className="space-y-6">
-              {mode === "public" || mode === "relay" ? (
-                <>
-                  <div className="relative">
-                    <Search
-                      className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-600 dark:text-zinc-400"
-                      size={20}
-                    />
-                    <Input
-                      type="text"
-                      placeholder="Search packages (e.g., nginx, redis, docker)..."
-                      className="pl-11 w-full text-[15px] py-6"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      autoFocus
-                    />
+              <div className="rounded-2xl border border-blue-200/60 bg-blue-50/70 p-4 text-sm text-blue-800 dark:border-blue-900/30 dark:bg-blue-900/10 dark:text-blue-300">
+                <div className="font-semibold">Newbie guide</div>
+                <div className="mt-1">
+                  Search a package name like <span className="font-mono">nginx</span>, <span className="font-mono">redis</span>, or <span className="font-mono">docker.io</span>. When install finishes, EINFRA will trigger service discovery so newly created system services can appear in the list.
+                </div>
+              </div>
+
+              <div className="relative max-w-2xl">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
+                <Input
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setSelectedPackage(event.target.value);
+                  }}
+                  placeholder="Search package from repository or installed inventory..."
+                  className="pl-10"
+                />
+              </div>
+
+              <div className="rounded-2xl border border-zinc-200/60 bg-white p-4 shadow-sm dark:border-zinc-800/60 dark:bg-[#121212]">
+                <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                  <Sparkles size={12} />
+                  Suggestions
+                  {searching ? <Loader2 size={12} className="animate-spin" /> : null}
+                </div>
+                {packageResults.length === 0 ? (
+                  <div className="text-sm text-zinc-500">
+                    {query.trim().length < 2
+                      ? "Type at least 2 characters to search the package repository."
+                      : "No matching package suggestions were returned. You can still install manually by package name."}
                   </div>
-                  <div className="space-y-2">
-                    {isSearching ? (
-                      <div className="text-center py-8 text-zinc-500">
-                        Searching repositories...
-                      </div>
-                    ) : (
-                      searchResults.map((pkg) => (
-                        <div
-                          key={pkg.name}
-                          onClick={() => {
-                            setSelectedPackage(pkg);
-                            setStep("config");
-                          }}
-                          className="flex items-center justify-between p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-500 hover:bg-white dark:hover:bg-zinc-100 dark:bg-zinc-800 transition-all cursor-pointer group"
-                        >
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500">
-                              <Globe size={20} />
-                            </div>
-                            <div>
-                              <h4 className="font-bold text-zinc-900 dark:text-white">
-                                {pkg.name}
-                              </h4>
-                              <p className="text-sm text-zinc-500">
-                                {pkg.description}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-xs font-mono bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded text-zinc-600 dark:text-zinc-400">
-                              {pkg.version}
-                            </span>
-                            <div className="text-xs text-zinc-600 dark:text-zinc-400 mt-1">
-                              {pkg.size}
-                            </div>
-                          </div>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {packageResults.map((pkg) => (
+                      <button
+                        key={`${pkg.source}:${pkg.name}`}
+                        type="button"
+                        onClick={() => setSelectedPackage(pkg.name)}
+                        className={cn(
+                          "rounded-xl border p-4 text-left transition",
+                          selectedPackage === pkg.name
+                            ? "border-blue-400 bg-blue-50 dark:border-blue-500/60 dark:bg-blue-900/15"
+                            : "border-zinc-200/60 hover:border-blue-300 dark:border-zinc-800/60 dark:hover:border-blue-500/40",
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="font-semibold text-zinc-900 dark:text-zinc-100">{pkg.name}</div>
+                          <span className="rounded-full bg-zinc-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                            {pkg.source}
+                          </span>
                         </div>
-                      ))
-                    )}
-                    {!isSearching &&
-                      searchResults.length === 0 &&
-                      searchQuery && (
-                        <div className="text-center py-8 text-zinc-500">
-                          No packages found for "{searchQuery}"
-                        </div>
-                      )}
+                        <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">{pkg.description}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-[1fr_260px]">
+                <div className="rounded-2xl border border-zinc-200/60 bg-white p-4 shadow-sm dark:border-zinc-800/60 dark:bg-[#121212]">
+                  <div className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">Selected package</div>
+                  <Input value={selectedPackage} onChange={(event) => setSelectedPackage(event.target.value)} placeholder="Package name to install" />
+                  <div className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+                    Node OS detected: <span className="font-semibold">{serverOS}</span>. Official repository install is the supported production path right now.
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/80 p-4 shadow-sm dark:border-zinc-800/60 dark:bg-zinc-950/40">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    <ShieldCheck size={16} className="text-emerald-500" />
+                    What happens next
+                  </div>
+                  <ul className="space-y-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    <li>1. Install package through agent typed package operation.</li>
+                    <li>2. Trigger service discovery.</li>
+                    <li>3. Refresh service list so the new unit appears when available.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {step === "review" ? (
+            <div className="space-y-6">
+              {mode === "public" ? (
+                <>
+                  <div className="rounded-2xl border border-zinc-200/60 bg-white p-5 shadow-sm dark:border-zinc-800/60 dark:bg-[#121212]">
+                    <div className="mb-3 flex items-center gap-2 text-lg font-bold tracking-tight text-zinc-900 dark:text-white">
+                      <Terminal size={18} className="text-blue-500" />
+                      Ready to install
+                    </div>
+                    <div className="text-sm text-zinc-600 dark:text-zinc-300">
+                      Package <span className="font-mono font-semibold">{selectedPackage || "(not selected)"}</span> will be installed on this node using the backend package action. Once installation finishes, EINFRA will run service discovery so the Services list can refresh.
+                    </div>
+                  </div>
+                </>
+              ) : guidance ? (
+                <div className="rounded-2xl border border-zinc-200/60 bg-white p-5 shadow-sm dark:border-zinc-800/60 dark:bg-[#121212]">
+                  <div className="mb-3 flex items-center gap-2 text-lg font-bold tracking-tight text-zinc-900 dark:text-white">
+                    {mode === "private" ? <Upload size={18} className="text-purple-500" /> : <Network size={18} className="text-amber-500" />}
+                    {guidance.title}
+                  </div>
+                  <div className="space-y-3 text-sm text-zinc-600 dark:text-zinc-300">
+                    {guidance.lines.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {step === "result" ? (
+            <div className="flex h-full flex-col items-center justify-center text-center">
+              {installing ? (
+                <>
+                  <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">
+                    <Loader2 size={34} className="animate-spin" />
+                  </div>
+                  <div className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">Installing service package</div>
+                  <div className="mt-3 max-w-xl text-sm text-zinc-500 dark:text-zinc-400">
+                    We are dispatching the package install command and syncing service discovery. This can take a little longer on fresh nodes.
                   </div>
                 </>
               ) : (
-                <div
-                  className="border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-2xl h-64 flex flex-col items-center justify-center gap-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
-                  onClick={() => {
-                    // Simulate upload
-                    setSelectedPackage({
-                      name: "custom-app",
-                      version: "1.0.0",
-                      description: "Uploaded Package",
-                      repo: "local",
-                      size: "50 MB",
-                    });
-                    setStep("config");
-                  }}
-                >
-                  <div className="p-4 bg-zinc-100 dark:bg-zinc-800 rounded-full text-zinc-500">
-                    <Upload size={32} />
+                <>
+                  <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400">
+                    <CheckCircle2 size={34} />
                   </div>
-                  <div className="text-center">
-                    <h3 className="font-bold text-zinc-900 dark:text-white">
-                      Click to Upload Package
-                    </h3>
-                    <p className="text-sm text-zinc-500 mt-1">
-                      Supports .deb, .rpm, .apk, .tar.gz
-                    </p>
-                  </div>
-                </div>
+                  <div className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">Workflow completed</div>
+                  <div className="mt-3 max-w-2xl text-sm text-zinc-500 dark:text-zinc-400">{resultMessage}</div>
+                  {discoveryLoading ? (
+                    <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                      <Loader2 size={12} className="animate-spin" />
+                      Running service discovery...
+                    </div>
+                  ) : null}
+                </>
               )}
             </div>
-          )}
-
-          {step === "config" && template && (
-            <div className="space-y-6">
-              <div className="flex items-center gap-4 p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/30">
-                <div className="w-12 h-12 rounded-lg bg-white dark:bg-zinc-900 shadow-sm flex items-center justify-center text-blue-600">
-                  <FileCode size={24} />
-                </div>
-                <div>
-                  <h3 className="font-bold text-zinc-900 dark:text-white">
-                    Configure {template.name}
-                  </h3>
-                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                    {template.description}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid gap-4">
-                {template.configFields.map((field) => (
-                  <div key={field.key} className="space-y-1.5">
-                    <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                      {field.label}{" "}
-                      {field.required && (
-                        <span className="text-red-500">*</span>
-                      )}
-                    </label>
-                    {field.type === "boolean" ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={config[field.key] || false}
-                          onChange={(e) =>
-                            setConfig({
-                              ...config,
-                              [field.key]: e.target.checked,
-                            })
-                          }
-                          className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="text-sm text-zinc-500">Enable</span>
-                      </div>
-                    ) : (
-                      <Input
-                        type={field.type}
-                        value={config[field.key] || ""}
-                        onChange={(e) =>
-                          setConfig({ ...config, [field.key]: e.target.value })
-                        }
-                        className="w-full"
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {step === "review" && dryRun && selectedPackage && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-4">
-                <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800">
-                  <div className="text-xs text-zinc-500 uppercase font-bold mb-2 flex items-center gap-2">
-                    <Disc size={14} /> Disk Usage
-                  </div>
-                  <div className="text-lg font-bold">{dryRun.diskUsage}</div>
-                </div>
-                <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800">
-                  <div className="text-xs text-zinc-500 uppercase font-bold mb-2 flex items-center gap-2">
-                    <Network size={14} /> Ports
-                  </div>
-                  <div className="text-lg font-bold">
-                    {dryRun.newPorts.length > 0
-                      ? dryRun.newPorts.join(", ")
-                      : "None"}
-                  </div>
-                </div>
-                <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800">
-                  <div className="text-xs text-zinc-500 uppercase font-bold mb-2 flex items-center gap-2">
-                    <Cpu size={14} /> Dependencies
-                  </div>
-                  <div className="text-lg font-bold">
-                    {dryRun.dependencies.length}
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-zinc-50 dark:bg-zinc-950 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800">
-                <div className="px-4 py-2 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
-                  <Terminal size={14} className="text-zinc-600 dark:text-zinc-400" />
-                  <span className="text-xs font-mono text-zinc-600 dark:text-zinc-400">
-                    Dry Run Preview
-                  </span>
-                </div>
-                <div className="p-4 font-mono text-sm text-zinc-700 dark:text-zinc-300 space-y-1">
-                  {dryRun.commands.map((cmd, i) => (
-                    <div key={i} className="flex gap-2">
-                      <span className="text-blue-500 select-none">$</span>
-                      <span>{cmd}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-900/30 text-amber-700 dark:text-amber-400 text-sm">
-                <ShieldCheck size={20} className="shrink-0" />
-                <div>
-                  <span className="font-bold">Security Verification:</span>{" "}
-                  Package signature verified. Installing this service will
-                  register it with systemd.
-                </div>
-              </div>
-            </div>
-          )}
-
-          {step === "install" && (
-            <div className="h-full flex flex-col">
-              {installStatus === "completed" ? (
-                <div className="flex flex-col items-center justify-center flex-1 text-center animate-in zoom-in duration-300">
-                  <div className="w-20 h-20 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 flex items-center justify-center mb-6">
-                    <CheckCircle2 size={40} />
-                  </div>
-                  <h3 className="text-2xl font-bold text-zinc-900 dark:text-white mb-2">
-                    Installation Complete
-                  </h3>
-                  <p className="text-zinc-500 max-w-sm mb-8">
-                    <span className="font-bold text-zinc-900 dark:text-white">
-                      {selectedPackage?.name}
-                    </span>{" "}
-                    has been successfully installed and started.
-                  </p>
-                  <button
-                    onClick={onClose}
-                    className="px-6 py-2.5 bg-white dark:bg-zinc-900 dark:bg-white text-zinc-900 dark:text-white dark:text-black rounded-lg hover:opacity-90 transition-opacity font-medium"
-                  >
-                    Done
-                  </button>
-                </div>
-              ) : (
-                <div className="flex-1 overflow-hidden flex flex-col">
-                  <div className="mb-6 space-y-2">
-                    <div className="flex justify-between text-sm font-medium mb-1">
-                      <span>Installing {selectedPackage?.name}...</span>
-                      <span>
-                        {Math.min(
-                          100,
-                          Math.round((installLogs.length / 7) * 100),
-                        )}
-                        %
-                      </span>
-                    </div>
-                    <div className="h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-blue-600 transition-all duration-300 ease-out"
-                        style={{
-                          width: `${Math.min(100, (installLogs.length / 7) * 100)}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex-1 bg-zinc-50 dark:bg-zinc-950 rounded-xl p-4 overflow-y-auto font-mono text-sm border border-zinc-200 dark:border-zinc-800">
-                    {installLogs.map((log, i) => (
-                      <div
-                        key={i}
-                        className="flex gap-3 mb-2 animate-in slide-in-from-left-2 duration-200"
-                      >
-                        <span
-                          className={cn(
-                            "uppercase text-xs font-bold w-20 shrink-0 pt-0.5",
-                            log.status === "completed"
-                              ? "text-green-500"
-                              : log.status === "failed"
-                                ? "text-red-500"
-                                : "text-blue-500",
-                          )}
-                        >
-                          {log.step}
-                        </span>
-                        <span className="text-zinc-700 dark:text-zinc-300">{log.detail}</span>
-                      </div>
-                    ))}
-                    {installStatus === "installing" && (
-                      <div className="flex gap-3 animate-pulse">
-                        <span className="uppercase text-xs font-bold w-20 shrink-0 text-zinc-600">
-                          ...
-                        </span>
-                        <span className="text-zinc-500">Processing...</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          ) : null}
         </div>
 
-        {/* Footer Actions */}
-        {step !== "install" && (
-          <div className="p-6 border-t border-zinc-200/60 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-800/10 flex justify-between items-center">
-            {step !== "mode" ? (
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  if (step === "package") setStep("mode");
-                  else if (step === "config") setStep("package");
-                  else if (step === "review") setStep("config");
-                }}
-              >
-                Back
-              </Button>
-            ) : (
-              <div></div>
-            )}
-
+        {step !== "result" ? (
+          <div className="flex items-center justify-between border-t border-zinc-200/70 bg-zinc-50/80 px-6 py-4 dark:border-zinc-800/70 dark:bg-zinc-800/15">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (step === "package") setStep("mode");
+                if (step === "review") setStep(mode === "public" ? "package" : "mode");
+              }}
+            >
+              Back
+            </Button>
             <Button
               variant="primary"
-              disabled={
-                (step === "mode" && !mode) ||
-                (step === "package" && !selectedPackage) ||
-                step === "config" && false // Optional config validation
-              }
+              disabled={(step === "package" && !canInstallPublic) || installing}
               onClick={() => {
-                if (step === "config") handleRunDryRun();
-                else if (step === "review") handleInstall();
-                else if (step === "mode") setStep("package");
-                else if (step === "package") setStep("config");
+                if (step === "package") setStep("review");
+                else if (step === "review" && mode === "public") {
+                  void handlePublicInstall();
+                } else if (step === "review") {
+                  onClose();
+                }
               }}
-              className="px-6 py-2 bg-blue-600 text-zinc-900 dark:text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium flex items-center gap-2 shadow-sm shadow-blue-500/20"
             >
               {step === "review" ? (
-                <>
-                  Install Service <Download size={16} />
-                </>
+                mode === "public" ? (
+                  <>
+                    Install package <ArrowRight size={16} className="ml-2" />
+                  </>
+                ) : (
+                  "Close guide"
+                )
               ) : (
                 <>
-                  Next Step <ArrowRight size={16} />
+                  Continue <ArrowRight size={16} className="ml-2" />
                 </>
               )}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex justify-end border-t border-zinc-200/70 bg-zinc-50/80 px-6 py-4 dark:border-zinc-800/70 dark:bg-zinc-800/15">
+            <Button variant="primary" onClick={onClose} disabled={installing}>
+              Done
             </Button>
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function ModeCard({
+  icon,
+  title,
+  description,
+  accent,
+  onClick,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  accent: "blue" | "purple" | "amber";
+  onClick: () => void;
+}) {
+  const accentClasses =
+    accent === "blue"
+      ? "hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/10"
+      : accent === "purple"
+        ? "hover:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/10"
+        : "hover:border-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/10";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex flex-col items-center justify-center rounded-2xl border-2 border-zinc-200 p-8 text-center transition-all dark:border-zinc-800",
+        accentClasses,
+      )}
+    >
+      <div className="mb-4 rounded-full bg-zinc-100 p-4 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{icon}</div>
+      <div className="text-lg font-bold text-zinc-900 dark:text-white">{title}</div>
+      <div className="mt-2 max-w-xs text-sm text-zinc-500 dark:text-zinc-400">{description}</div>
+    </button>
+  );
+}
+
+function parsePackageSearch(output: string): PackageCandidate[] {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name, ...rest] = line.split(/\s+-\s+/);
+      const normalizedName = (name ?? "").split(/\s+/)[0] ?? "";
+      return {
+        name: normalizedName,
+        description: rest.join(" - ") || "Repository package",
+        source: "repository" as const,
+      };
+    })
+    .filter((item) => item.name.length > 0 && !item.name.startsWith("Listing") && !item.name.startsWith("Installed"));
+}
+
+function dedupePackages(items: PackageCandidate[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.name)) return false;
+    seen.add(item.name);
+    return true;
+  });
+}
+
+function escapeSingleQuotes(value: string) {
+  return value.replace(/'/g, `'\"'\"'`);
 }

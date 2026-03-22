@@ -15,7 +15,7 @@ var serviceNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.@-]+$`)
 
 type AgentCommandDispatcher interface {
 	Dispatch(ctx context.Context, serverID, userID, cmd string, timeoutSec int, idempotencyKey string) (*agent.Command, error)
-	DispatchOperation(ctx context.Context, serverID, userID, operation string, params map[string]any, timeoutSec int, idempotencyKey string) (*agent.Command, error)
+	DispatchOperation(ctx context.Context, serverID, userID string, payload agent.ControlOperationPayload, idempotencyKey string) (*agent.Command, error)
 }
 
 type RemoteOperations struct {

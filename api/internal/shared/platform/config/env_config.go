@@ -28,14 +28,29 @@ type Config struct {
 	Encryption     EncryptionConfig
 	ELK            ELKConfig
 	NATS           NATSConfig
+	AgentArtifacts AgentArtifactsConfig
 }
 
 type NATSConfig struct {
 	URL string `example:"nats://localhost:4222"`
 }
 
+type AgentArtifactsConfig struct {
+	Version           string   `example:"1.0.0"`
+	Channel           string   `example:"stable"`
+	MinVersion        string   `example:"1.0.0"`
+	ReleaseNotes      string   `example:"Production release"`
+	WarmTargets       []string `example:"linux/amd64,linux/arm64"`
+	SigningPrivateKey string
+	SigningPublicKey  string
+}
+
 type ELKConfig struct {
-	ElasticAPMEndpoint string `example:"http://localhost:8200"`
+	ElasticAPMEndpoint       string `example:"http://localhost:8200"`
+	ElasticsearchEnabled     bool   `example:"false"`
+	ElasticsearchEndpoint    string `example:"http://localhost:9200"`
+	ElasticsearchAPIKey      string
+	ElasticsearchIndexPrefix string `example:"einfra-api"`
 }
 
 // ServerConfig holds the server configuration
@@ -201,6 +216,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	config := &Config{
 		Server: ServerConfig{
 			Port:            getEnv("SERVER_PORT", ":8080"),
+			GRPCPort:        getEnv("SERVER_GRPC_PORT", ":50051"),
 			Host:            getEnv("SERVER_HOST", "0.0.0.0"),
 			ReadTimeout:     getDurationEnv("SERVER_READ_TIMEOUT", 30*time.Second),
 			WriteTimeout:    getDurationEnv("SERVER_WRITE_TIMEOUT", 30*time.Second),
@@ -313,10 +329,23 @@ func LoadConfig(configPath string) (*Config, error) {
 			Version: getIntEnv("ENCRYPTION_KEY_VERSION", 1),
 		},
 		ELK: ELKConfig{
-			ElasticAPMEndpoint: getEnv("ELASTIC_APM_ENDPOINT", "http://localhost:8200"),
+			ElasticAPMEndpoint:       getEnv("ELASTIC_APM_ENDPOINT", "http://localhost:8200"),
+			ElasticsearchEnabled:     getBoolEnv("ELASTICSEARCH_ENABLED", false),
+			ElasticsearchEndpoint:    getEnv("ELASTICSEARCH_ENDPOINT", ""),
+			ElasticsearchAPIKey:      getEnv("ELASTICSEARCH_API_KEY", ""),
+			ElasticsearchIndexPrefix: getEnv("ELASTICSEARCH_INDEX_PREFIX", "einfra-api"),
 		},
 		NATS: NATSConfig{
 			URL: getEnv("NATS_URL", "nats://localhost:4222"),
+		},
+		AgentArtifacts: AgentArtifactsConfig{
+			Version:           getEnv("AGENT_ARTIFACT_VERSION", "1.0.0"),
+			Channel:           getEnv("AGENT_ARTIFACT_CHANNEL", "stable"),
+			MinVersion:        getEnv("AGENT_ARTIFACT_MIN_VERSION", ""),
+			ReleaseNotes:      getEnv("AGENT_ARTIFACT_RELEASE_NOTES", ""),
+			WarmTargets:       getSliceEnv("AGENT_ARTIFACT_WARM_TARGETS", []string{"linux/amd64", "linux/arm64"}),
+			SigningPrivateKey: getEnv("AGENT_ARTIFACT_SIGNING_PRIVATE_KEY", ""),
+			SigningPublicKey:  getEnv("AGENT_ARTIFACT_SIGNING_PUBLIC_KEY", ""),
 		},
 	}
 

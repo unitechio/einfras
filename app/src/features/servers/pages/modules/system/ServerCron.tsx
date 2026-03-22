@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Plus, Play, Trash2, Edit2, RotateCcw } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Plus, Play, Trash2, Edit2, RotateCcw, Search } from "lucide-react";
 import { CronStatusBadge } from "@/features/cron/components/CronStatusBadge";
 import { CronNextRun } from "@/features/cron/components/CronNextRun";
 import { CronLogDrawer } from "@/features/cron/components/CronLogDrawer";
@@ -10,10 +10,13 @@ import { Button } from "@/shared/ui/Button";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/shared/ui/Table";
 import { useServerCron, useDeleteCronJob, useUpdateCronJob, useExecuteCronJob, useCronHistory } from "../../../api/useServerHooks";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNotification } from "@/core/NotificationContext";
+import { Input } from "@/shared/ui/Input";
 
 export default function ServerCron() {
   const { serverId } = useParams<{ serverId: string }>();
   const qc = useQueryClient();
+  const { showNotification } = useNotification();
 
   // Real Hooks
   const { data: jobsData, isLoading } = useServerCron(serverId || "");
@@ -23,16 +26,35 @@ export default function ServerCron() {
 
   const jobs = jobsData || [];
   const [runningJobs, setRunningJobs] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
 
   // Drawer State
   const [selectedJobIdForLogs, setSelectedJobIdForLogs] = useState<string | null>(null);
   const [selectedJobTitle, setSelectedJobTitle] = useState("");
+  const filteredJobs = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) return jobs;
+    return jobs.filter((job) =>
+      [job.name, job.command, job.schedule, job.user, job.description]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(keyword)),
+    );
+  }, [jobs, search]);
 
   const handleToggle = async (id: string, enabled: boolean) => {
     try {
       await updateJob({ id, body: { enabled } });
+      showNotification({
+        type: "success",
+        message: "Job updated",
+        description: `Scheduler job is now ${enabled ? "enabled" : "disabled"}.`,
+      });
     } catch (error) {
-      console.error("Failed to toggle cron job", error);
+      showNotification({
+        type: "error",
+        message: "Failed to update job",
+        description: error instanceof Error ? error.message : "Request failed.",
+      });
     }
   };
 
@@ -40,8 +62,17 @@ export default function ServerCron() {
     if (confirm("Are you sure you want to delete this cron job?")) {
       try {
         await deleteJob(id);
+        showNotification({
+          type: "success",
+          message: "Job deleted",
+          description: "The scheduled job was removed.",
+        });
       } catch (error) {
-        console.error("Failed to delete cron job", error);
+        showNotification({
+          type: "error",
+          message: "Failed to delete job",
+          description: error instanceof Error ? error.message : "Request failed.",
+        });
       }
     }
   };
@@ -55,8 +86,17 @@ export default function ServerCron() {
     try {
       await executeJob(id);
       qc.invalidateQueries({ queryKey: ["servers", "cron", serverId] });
+      showNotification({
+        type: "success",
+        message: "Job execution queued",
+        description: "The selected cron job has been triggered manually.",
+      });
     } catch (error) {
-      console.error("Failed to execute cron job", error);
+      showNotification({
+        type: "error",
+        message: "Failed to run job",
+        description: error instanceof Error ? error.message : "Request failed.",
+      });
     } finally {
       setRunningJobs((prev) => {
         const next = new Set(prev);
@@ -93,6 +133,15 @@ export default function ServerCron() {
             <span>Add Job</span>
           </Button>
         </Link>
+        <Button variant="outline" onClick={() => void qc.invalidateQueries({ queryKey: ["servers", "cron", serverId] })}>
+          <RotateCcw size={16} className="mr-2" />
+          Refresh
+        </Button>
+      </div>
+
+      <div className="relative max-w-md">
+        <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={15} />
+        <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name, command, schedule, user..." className="pl-10" />
       </div>
 
       <div className="bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl shadow-sm overflow-hidden transition-all">
@@ -116,17 +165,17 @@ export default function ServerCron() {
                   </div>
                 </TableCell>
               </TableRow>
-            ) : jobs.length === 0 ? (
+            ) : filteredJobs.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={6}
                   className="h-48 text-center text-sm font-medium text-zinc-500 dark:text-zinc-400"
                 >
-                  No cron jobs configured
+                  {jobs.length === 0 ? "No cron jobs configured" : "No scheduler job matches your search"}
                 </TableCell>
               </TableRow>
             ) : (
-              jobs.map((job) => (
+              filteredJobs.map((job) => (
                 <TableRow
                   key={job.id}
                   className={cn(
@@ -243,10 +292,14 @@ export default function ServerCron() {
         logs={
           historyLogs?.map((l) => ({
             id: l.id,
+            jobId: selectedJobIdForLogs || "",
+            startTime: l.executed_at || new Date().toISOString(),
+            endTime: l.executed_at || new Date().toISOString(),
+            duration: l.duration_ms || 0,
             status: l.status as any,
-            output: l.output || "",
-            executedAt: l.executed_at,
-            durationMs: l.duration_ms || 0,
+            exitCode: l.status === "success" ? 0 : 1,
+            stdout: l.output || "",
+            stderr: l.status === "failed" ? l.output || "Execution failed" : "",
           })) || []
         }
       />

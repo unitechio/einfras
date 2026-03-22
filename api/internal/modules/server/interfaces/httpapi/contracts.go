@@ -5,24 +5,19 @@ import (
 	"time"
 
 	domain "einfra/api/internal/modules/server/domain"
+	"einfra/api/internal/platform/apierrors"
 )
 
 type responseEnvelope struct {
-	Status   string         `json:"status"`
-	Resource string         `json:"resource,omitempty"`
-	Action   string         `json:"action,omitempty"`
-	Item     any            `json:"item,omitempty"`
-	Items    any            `json:"items,omitempty"`
-	Command  any            `json:"command,omitempty"`
-	Result   any            `json:"result,omitempty"`
-	Meta     map[string]any `json:"meta,omitempty"`
-	Error    *errorDetail   `json:"error,omitempty"`
-}
-
-type errorDetail struct {
-	Code    string         `json:"code"`
-	Message string         `json:"message"`
-	Details map[string]any `json:"details,omitempty"`
+	Status   string            `json:"status"`
+	Resource string            `json:"resource,omitempty"`
+	Action   string            `json:"action,omitempty"`
+	Item     any               `json:"item,omitempty"`
+	Items    any               `json:"items,omitempty"`
+	Command  any               `json:"command,omitempty"`
+	Result   any               `json:"result,omitempty"`
+	Meta     map[string]any    `json:"meta,omitempty"`
+	Error    *apierrors.Detail `json:"error,omitempty"`
 }
 
 func itemEnvelope(status, resource string, item any, meta map[string]any) responseEnvelope {
@@ -55,15 +50,21 @@ func actionEnvelope(status, resource, action string, command, result any, meta m
 }
 
 func errorEnvelope(resource, action, code, message string, details map[string]any) responseEnvelope {
-	return responseEnvelope{
+	envelope := apierrors.Envelope{
 		Status:   "error",
 		Resource: resource,
 		Action:   action,
-		Error: &errorDetail{
+		Error: &apierrors.Detail{
 			Code:    code,
 			Message: message,
 			Details: details,
 		},
+	}
+	return responseEnvelope{
+		Status:   envelope.Status,
+		Resource: envelope.Resource,
+		Action:   envelope.Action,
+		Error:    envelope.Error,
 	}
 }
 

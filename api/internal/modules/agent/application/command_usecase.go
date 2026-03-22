@@ -3,11 +3,14 @@ package agentregistry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"gorm.io/gorm"
 
 	agent "einfra/api/internal/modules/agent/domain"
 	"einfra/api/internal/shared/events"
@@ -18,6 +21,7 @@ type CommandRepository interface {
 	UpdateStatus(ctx context.Context, id string, status agent.CommandStatus, exitCode *int) error
 	AppendLog(ctx context.Context, log *agent.CommandLog) error
 	FindByID(ctx context.Context, id string) (*agent.Command, error)
+	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (*agent.Command, error)
 	ListByServer(ctx context.Context, serverID string, limit int) ([]*agent.Command, error)
 	GetLogs(ctx context.Context, commandID string) ([]*agent.CommandLog, error)
 }
@@ -79,30 +83,26 @@ func (d *Dispatcher) Dispatch(ctx context.Context, serverID, userID, cmd string,
 	}, timeoutSec, idempotencyKey)
 }
 
-func (d *Dispatcher) DispatchOperation(ctx context.Context, serverID, userID, operation string, params map[string]any, timeoutSec int, idempotencyKey string) (*agent.Command, error) {
+func (d *Dispatcher) DispatchOperation(ctx context.Context, serverID, userID string, payload agent.ControlOperationPayload, idempotencyKey string) (*agent.Command, error) {
 	payloadJSON := ""
-	payload := agent.ControlOperationPayload{
-		Operation: operation,
-		TimeoutS:  timeoutSec,
-		Params:    params,
-	}
-	if len(params) > 0 || operation != "" {
+	if len(payload.Params) > 0 || payload.Operation != "" {
 		if b, err := json.Marshal(payload); err == nil {
 			payloadJSON = string(b)
 		}
 	}
-	return d.dispatch(ctx, serverID, userID, agent.CommandTypeControlOperation, operation, payloadJSON, map[string]any{
+	return d.dispatch(ctx, serverID, userID, agent.CommandTypeControlOperation, payload.Operation, payloadJSON, map[string]any{
 		"type":            "CONTROL_OPERATION",
 		"message_id":      "",
 		"idempotency_key": idempotencyKey,
 		"payload": map[string]any{
 			"command_id":      "",
-			"operation":       operation,
-			"params":          params,
-			"timeout_s":       timeoutSec,
+			"operation":       payload.Operation,
+			"params":          payload.Params,
+			"timeout_s":       payload.TimeoutS,
 			"idempotency_key": idempotencyKey,
+			"payload_json":    payloadJSON,
 		},
-	}, timeoutSec, idempotencyKey)
+	}, payload.TimeoutS, idempotencyKey)
 }
 
 func (d *Dispatcher) dispatch(ctx context.Context, serverID, userID string, commandType agent.CommandType, cmd, payloadJSON string, message map[string]any, timeoutSec int, idempotencyKey string) (*agent.Command, error) {
@@ -139,6 +139,17 @@ func (d *Dispatcher) dispatch(ctx context.Context, serverID, userID string, comm
 		CreatedAt:      time.Now(),
 	}
 	if err := d.repo.Create(ctx, command); err != nil {
+		if ikey != "" && isDuplicateIdempotencyErr(err) {
+			existing, findErr := d.repo.FindByIdempotencyKey(ctx, ikey)
+			if findErr == nil && existing != nil {
+				log.Info().
+					Str("command_id", existing.ID).
+					Str("server_id", serverID).
+					Str("idempotency_key", ikey).
+					Msg("[dispatcher] duplicate idempotency key reused existing command")
+				return existing, nil
+			}
+		}
 		return nil, fmt.Errorf("persist command: %w", err)
 	}
 
@@ -190,6 +201,10 @@ func (d *Dispatcher) dispatch(ctx context.Context, serverID, userID string, comm
 	_ = d.repo.UpdateStatus(ctx, command.ID, agent.StatusRunning, nil)
 
 	return command, nil
+}
+
+func isDuplicateIdempotencyErr(err error) bool {
+	return errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(strings.ToLower(err.Error()), "duplicate key value violates unique constraint")
 }
 
 // Cancel sends a cancel signal to the agent for a running command.

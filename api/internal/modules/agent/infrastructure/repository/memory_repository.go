@@ -74,6 +74,18 @@ func (r *MemoryCommandRepository) FindByID(_ context.Context, id string) (*agent
 	return &copyCmd, nil
 }
 
+func (r *MemoryCommandRepository) FindByIdempotencyKey(_ context.Context, idempotencyKey string) (*agent.Command, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, cmd := range r.commands {
+		if cmd.IdempotencyKey == idempotencyKey {
+			copyCmd := *cmd
+			return &copyCmd, nil
+		}
+	}
+	return nil, fmt.Errorf("command with idempotency key %q not found", idempotencyKey)
+}
+
 func (r *MemoryCommandRepository) ListByServer(_ context.Context, serverID string, limit int) ([]*agent.Command, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

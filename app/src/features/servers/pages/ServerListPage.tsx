@@ -19,6 +19,7 @@ import {
   Check,
   AlertCircle,
   Loader2,
+  Wrench,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -32,12 +33,15 @@ import { Button } from "@/shared/ui/Button";
 function FilterDropdown({
   label,
   options,
+  selected,
+  onToggle,
 }: {
   label: string;
   options: string[];
+  selected: string[];
+  onToggle: (option: string) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -54,14 +58,6 @@ function FilterDropdown({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
-
-  const toggleOption = (option: string) => {
-    if (selected.includes(option)) {
-      setSelected(selected.filter((item) => item !== option));
-    } else {
-      setSelected([...selected, option]);
-    }
-  };
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -95,7 +91,7 @@ function FilterDropdown({
             {options.map((option) => (
               <div
                 key={option}
-                onClick={() => toggleOption(option)}
+                onClick={() => onToggle(option)}
                 className={cn(
                   "flex items-center gap-2 px-3 py-2 rounded-sm cursor-pointer  text-xs font-medium cursor-pointer transition-colors",
                   selected.includes(option)
@@ -151,11 +147,49 @@ const ServerHealthCheckButton = ({ serverId }: { serverId: string }) => {
   );
 };
 
+function QuickActionLink({
+  to,
+  icon: Icon,
+  label,
+  tone = "neutral",
+  compact,
+}: {
+  to: string;
+  icon: typeof Settings;
+  label: string;
+  tone?: "neutral" | "blue";
+  compact?: boolean;
+}) {
+  const toneClass =
+    tone === "blue"
+      ? "bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+      : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300";
+
+  return (
+    <Link
+      to={to}
+      title={label}
+      className={cn(
+        "flex items-center justify-center gap-2 rounded-sm cursor-pointer text-xs font-bold transition-colors",
+        toneClass,
+        compact ? "px-3 py-2" : "px-3 py-2.5",
+      )}
+    >
+      <Icon size={14} />
+      {!compact && <span>{label}</span>}
+    </Link>
+  );
+}
+
 export default function ServerListPage() {
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [statusFilters, setStatusFilters] = useState<string[]>([]);
+  const [platformFilters, setPlatformFilters] = useState<string[]>([]);
+  const [connectionFilters, setConnectionFilters] = useState<string[]>([]);
+  const [tagFilters, setTagFilters] = useState<string[]>([]);
 
   const {
     data,
@@ -171,8 +205,52 @@ export default function ServerListPage() {
 
   const servers = data?.data || [];
 
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, pageSize, statusFilters, platformFilters, connectionFilters, tagFilters]);
+
+  const filteredServers = servers.filter((server) => {
+    const matchesStatus =
+      statusFilters.length === 0 ||
+      statusFilters.some((status) => status.toLowerCase() === server.status.toLowerCase());
+    const matchesPlatform =
+      platformFilters.length === 0 ||
+      platformFilters.some((platform) => platform.toLowerCase() === server.os.toLowerCase());
+    const matchesConnection =
+      connectionFilters.length === 0 ||
+      connectionFilters.some((type) => {
+        const normalized = type.toLowerCase();
+        if (normalized === "ssh agent") return server.connection_mode === "agent";
+        if (normalized === "winrm") return server.os === "windows" && server.connection_mode === "ssh";
+        return normalized === (server.connection_mode ?? "").toLowerCase();
+      });
+    const matchesTags =
+      tagFilters.length === 0 ||
+      tagFilters.some((tag) => (server.tags ?? []).map((item) => item.toLowerCase()).includes(tag.toLowerCase()));
+
+    return matchesStatus && matchesPlatform && matchesConnection && matchesTags;
+  });
+
+  const activeFilterCount =
+    statusFilters.length + platformFilters.length + connectionFilters.length + tagFilters.length;
+
   const handleRefresh = () => {
     refetch();
+  };
+
+  const toggleFilter = (setState: (value: string[] | ((current: string[]) => string[])) => void, option: string) => {
+    setState((current) =>
+      current.includes(option) ? current.filter((item) => item !== option) : [...current, option],
+    );
+  };
+
+  const clearFilters = () => {
+    setSearchTerm("");
+    setStatusFilters([]);
+    setPlatformFilters([]);
+    setConnectionFilters([]);
+    setTagFilters([]);
+    setPage(1);
   };
 
   if (isLoading && !isRefetching) {
@@ -206,7 +284,7 @@ export default function ServerListPage() {
     );
   }
 
-  if (servers.length === 0 && !searchTerm) {
+  if (filteredServers.length === 0 && !searchTerm && activeFilterCount === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[500px] gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
         <div className="relative">
@@ -300,10 +378,34 @@ export default function ServerListPage() {
             <div className="h-6 w-px bg-zinc-200 dark:bg-zinc-700 mx-2 hidden md:block" />
 
             {Object.entries(FILTER_OPTIONS).map(([label, options]) => (
-              <FilterDropdown key={label} label={label} options={options} />
+              <FilterDropdown
+                key={label}
+                label={label}
+                options={options}
+                selected={
+                  label === "Status"
+                    ? statusFilters
+                    : label === "Platform"
+                      ? platformFilters
+                      : label === "Connection Type"
+                        ? connectionFilters
+                        : label === "Tags"
+                          ? tagFilters
+                          : []
+                }
+                onToggle={(option) => {
+                  if (label === "Status") toggleFilter(setStatusFilters, option);
+                  if (label === "Platform") toggleFilter(setPlatformFilters, option);
+                  if (label === "Connection Type") toggleFilter(setConnectionFilters, option);
+                  if (label === "Tags") toggleFilter(setTagFilters, option);
+                }}
+              />
             ))}
 
-            <button className="text-xs font-bold text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/10 px-3 py-2 rounded-sm cursor-pointer  transition-colors ml-auto xl:ml-2">
+            <button
+              onClick={clearFilters}
+              className="text-xs font-bold text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/10 px-3 py-2 rounded-sm cursor-pointer  transition-colors ml-auto xl:ml-2"
+            >
               Clear all
             </button>
           </div>
@@ -348,7 +450,7 @@ export default function ServerListPage() {
       {/* Content */}
       <div className="space-y-4">
         {viewMode === "list" ? (
-          servers.map((server) => (
+          filteredServers.map((server) => (
             <div
               key={server.id}
               className="group bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-s overflow-hidden shadow-sm hover:shadow-md transition-all hover:border-blue-200 dark:hover:border-blue-800"
@@ -417,7 +519,13 @@ export default function ServerListPage() {
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-zinc-400">Type:</span>
                       <span className="font-medium text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-800/50 px-2 py-0.5 rounded border border-zinc-100 dark:border-zinc-800">
-                        {server.tunnel_enabled ? "Tunnel" : "Direct SSH"}
+                        {server.connection_mode === "agent"
+                          ? "Agent"
+                          : server.connection_mode === "bastion"
+                            ? "Bastion"
+                            : server.os === "windows"
+                              ? "WinRM"
+                              : "Direct SSH"}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -467,29 +575,29 @@ export default function ServerListPage() {
 
                     <div className="flex items-center gap-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400">
                       <Cpu size={14} className="text-zinc-400 shrink-0" />
-                      {server.cpu_cores} Cores
+                      {formatHardwareChip(server.cpu_cores, "Cores")}
                     </div>
                     <div className="flex items-center gap-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400">
                       <Activity size={14} className="text-zinc-400 shrink-0" />
-                      {server.memory_gb} GB RAM
+                      {formatHardwareChip(server.memory_gb, "GB RAM")}
                     </div>
                   </div>
                 </div>
 
                 {/* Actions */}
-                <div className="flex md:flex-col gap-2 border-l border-zinc-100 dark:border-zinc-800/50 pl-4 md:pl-0 md:border-none min-w-[140px]">
+                <div className="flex md:flex-col gap-2 border-l border-zinc-100 dark:border-zinc-800/50 pl-4 md:pl-0 md:border-none min-w-[190px]">
                   <div className="grid grid-cols-2 gap-2 w-full">
                     <ServerHealthCheckButton serverId={server.id} />
-                    <button className="flex items-center justify-center gap-2 px-3 py-2 rounded-sm cursor-pointer  bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 text-xs font-bold transition-colors">
-                      <Settings size={14} />
-                    </button>
+                    <QuickActionLink to={`/servers/${server.id}/system/info`} icon={Settings} label="Settings" compact />
+                    <QuickActionLink to={`/servers/${server.id}/services`} icon={Wrench} label="Services" compact />
+                    <QuickActionLink to={`/servers/${server.id}/system/terminal`} icon={Terminal} label="Terminal" compact />
                   </div>
-                  <Link
+                  <QuickActionLink
                     to={`/servers/${server.id}/overview`}
-                    className="hidden md:flex items-center justify-center gap-2 px-3 py-2 rounded-sm cursor-pointer  bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold transition-colors w-full"
-                  >
-                    Dashboard
-                  </Link>
+                    icon={Activity}
+                    label="Dashboard"
+                    tone="blue"
+                  />
                 </div>
               </div>
             </div>
@@ -497,7 +605,7 @@ export default function ServerListPage() {
         ) : (
           // GRID MODE
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {servers.map((server) => (
+            {filteredServers.map((server) => (
               <div
                 key={server.id}
                 className="group bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-all p-5 flex flex-col justify-between h-full hover:border-blue-200 dark:hover:border-blue-800"
@@ -555,13 +663,13 @@ export default function ServerListPage() {
                       <div className="flex justify-between text-xs items-center">
                         <span className="text-zinc-500 font-medium">CPU</span>
                         <span className="font-bold text-zinc-700 dark:text-zinc-300 font-mono">
-                          {server.cpu_cores} Cores
+                          {formatHardwareChip(server.cpu_cores, "Cores")}
                         </span>
                       </div>
                       <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
                         <div
                           className="bg-blue-500 h-full rounded-full"
-                          style={{ width: "0%" }}
+                          style={{ width: server.cpu_cores > 0 ? `${Math.min(100, server.cpu_cores * 8)}%` : "8%" }}
                         ></div>
                       </div>
                     </div>
@@ -571,13 +679,13 @@ export default function ServerListPage() {
                           Memory
                         </span>
                         <span className="font-bold text-zinc-700 dark:text-zinc-300 font-mono">
-                          {server.memory_gb} GB RAM
+                          {formatHardwareChip(server.memory_gb, "GB RAM")}
                         </span>
                       </div>
                       <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
                         <div
                           className="bg-purple-500 h-full rounded-full"
-                          style={{ width: "0%" }}
+                          style={{ width: server.memory_gb > 0 ? `${Math.min(100, server.memory_gb * 4)}%` : "8%" }}
                         ></div>
                       </div>
                     </div>
@@ -595,13 +703,28 @@ export default function ServerListPage() {
                   </div>
                 </div>
 
-                <div className="flex gap-2">
-                  <Link
+                <div className="grid grid-cols-2 gap-2">
+                  <QuickActionLink
                     to={`/servers/${server.id}/overview`}
-                    className="flex-1 bg-zinc-50 dark:bg-zinc-800 hover:bg-blue-600 hover:text-white text-zinc-700 dark:text-zinc-300 py-2.5 rounded-sm cursor-pointer  text-xs font-bold flex items-center justify-center gap-2 transition-all duration-300 group-hover:bg-blue-600 group-hover:text-white"
-                  >
-                    <Activity size={16} /> Open Dashboard
-                  </Link>
+                    icon={Activity}
+                    label="Dashboard"
+                    tone="blue"
+                  />
+                  <QuickActionLink
+                    to={`/servers/${server.id}/services`}
+                    icon={Wrench}
+                    label="Services"
+                  />
+                  <QuickActionLink
+                    to={`/servers/${server.id}/system/terminal`}
+                    icon={Terminal}
+                    label="Terminal"
+                  />
+                  <QuickActionLink
+                    to={`/servers/${server.id}/system/info`}
+                    icon={Settings}
+                    label="Settings"
+                  />
                   <ServerHealthCheckButton serverId={server.id} />
                 </div>
               </div>
@@ -629,9 +752,9 @@ export default function ServerListPage() {
         <div className="text-xs text-zinc-500 font-medium">
           Showing{" "}
           <span className="text-zinc-900 dark:text-white font-bold">
-            1-{servers.length}
+            {filteredServers.length === 0 ? 0 : (page - 1) * pageSize + 1}-{Math.min(page * pageSize, filteredServers.length)}
           </span>{" "}
-          of {servers.length}
+          of {filteredServers.length}
         </div>
         <div className="flex gap-1">
           <button 
@@ -652,4 +775,11 @@ export default function ServerListPage() {
       </div>
     </div>
   );
+}
+
+function formatHardwareChip(value: number | undefined, suffix: string) {
+  if (typeof value === "number" && value > 0) {
+    return `${value} ${suffix}`;
+  }
+  return "syncing";
 }

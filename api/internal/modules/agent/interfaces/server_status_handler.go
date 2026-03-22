@@ -6,15 +6,18 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/rs/zerolog/log"
 
 	agentregistry "einfra/api/internal/modules/agent/application"
 	"einfra/api/internal/modules/agent/domain"
+	"einfra/api/internal/platform/loggingx"
 )
 
 // AgentStatusHandler returns the live connection state of a server's agent.
 type AgentStatusHandler struct {
 	hub       *agentregistry.Hub
 	agentRepo AgentInfoReader
+	tracker   *loggingx.StateTracker
 }
 
 // AgentInfoReader is the minimal read interface for agent status queries.
@@ -25,7 +28,7 @@ type AgentInfoReader interface {
 
 // NewAgentStatusHandler creates a new status handler.
 func NewAgentStatusHandler(hub *agentregistry.Hub, agentRepo AgentInfoReader) *AgentStatusHandler {
-	return &AgentStatusHandler{hub: hub, agentRepo: agentRepo}
+	return &AgentStatusHandler{hub: hub, agentRepo: agentRepo, tracker: loggingx.NewStateTracker()}
 }
 
 // GetAgentStatus handles: GET /v1/servers/{id}/status
@@ -38,7 +41,19 @@ func (h *AgentStatusHandler) GetAgentStatus(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Live connectivity takes priority over DB state
-	liveOnline := h.hub.IsOnline(serverID)
+	liveOnline := h.hub.IsAnyTransportOnline(serverID)
+	statusLabel := "offline"
+	if liveOnline {
+		statusLabel = "online"
+	}
+	changed := h.tracker.Changed("agent-status:"+serverID, statusLabel)
+	if changed {
+		loggingx.New("agent-status").Info(log.Logger, "status-poll", serverID, statusLabel, map[string]any{
+			"route":   "/v1/servers/{id}/agent-status",
+			"changed": true,
+		})
+	}
+	w.Header().Set("X-Agent-Status-Changed", boolString(changed))
 
 	// Try to read last known info from DB
 	info, err := h.agentRepo.GetByServerID(serverID)
@@ -61,4 +76,11 @@ func (h *AgentStatusHandler) GetAgentStatus(w http.ResponseWriter, r *http.Reque
 func (h *AgentStatusHandler) ListOnlineServers(w http.ResponseWriter, r *http.Request) {
 	ids := h.hub.OnlineServerIDs()
 	writeJSON(w, http.StatusOK, listEnvelope("ok", "agent_online_server", ids, map[string]any{"count": len(ids)}))
+}
+
+func boolString(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
 }

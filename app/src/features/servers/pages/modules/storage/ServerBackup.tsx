@@ -19,11 +19,14 @@ import {
   Calendar,
   FileArchive,
   Trash2,
+  RefreshCw,
+  Search,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
+import { useNotification } from "@/core/NotificationContext";
 
 import { useServerBackups, useCreateBackup, useRestoreBackup, useDeleteBackup } from "../../../api/useServerHooks";
 import { useParams } from "react-router-dom";
@@ -32,6 +35,7 @@ import { useQueryClient } from "@tanstack/react-query";
 export default function ServerBackup() {
   const { serverId } = useParams<{ serverId: string }>();
   const qc = useQueryClient();
+  const { showNotification } = useNotification();
 
   // Real Hooks
   const { data: backupsData, isLoading } = useServerBackups(serverId || "");
@@ -40,12 +44,24 @@ export default function ServerBackup() {
   const { mutateAsync: deleteBackup } = useDeleteBackup(serverId || "");
 
   const backups = backupsData || [];
+  const [search, setSearch] = useState("");
+  const [selectedBackupId, setSelectedBackupId] = useState<string | null>(null);
+  const [customPath, setCustomPath] = useState("/etc");
 
   const handleRunBackup = async () => {
     try {
-      await createBackup({ label: `Manual Backup ${new Date().toLocaleString()}` });
+      await createBackup({ label: `Manual Backup ${new Date().toLocaleString()}`, path: customPath.trim() || "/etc" });
+      showNotification({
+        type: "success",
+        message: "Backup queued",
+        description: `A new backup job was created for ${customPath.trim() || "/etc"}.`,
+      });
     } catch (error) {
-      console.error("Failed to create backup", error);
+      showNotification({
+        type: "error",
+        message: "Failed to create backup",
+        description: error instanceof Error ? error.message : "Request failed.",
+      });
     }
   };
 
@@ -53,9 +69,17 @@ export default function ServerBackup() {
     if (confirm("Are you sure you want to restore from this backup? This will overwrite existing data.")) {
         try {
             await restoreBackup(backupId);
-            alert("Restore initiated successfully");
+            showNotification({
+              type: "success",
+              message: "Restore queued",
+              description: "The selected backup is being restored.",
+            });
         } catch (error) {
-            console.error("Failed to restore backup", error);
+            showNotification({
+              type: "error",
+              message: "Failed to restore backup",
+              description: error instanceof Error ? error.message : "Request failed.",
+            });
         }
     }
   };
@@ -64,11 +88,28 @@ export default function ServerBackup() {
     if (confirm("Are you sure you want to delete this backup?")) {
         try {
             await deleteBackup(backupId);
+            showNotification({
+              type: "success",
+              message: "Backup deleted",
+              description: "The selected backup has been removed.",
+            });
         } catch (error) {
-            console.error("Failed to delete backup", error);
+            showNotification({
+              type: "error",
+              message: "Failed to delete backup",
+              description: error instanceof Error ? error.message : "Request failed.",
+            });
         }
     }
   }
+  const filteredBackups = backups.filter((backup) => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) return true;
+    return [backup.label, backup.path, backup.status, backup.type]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(keyword));
+  });
+  const selectedBackup = backups.find((backup) => backup.id === selectedBackupId) ?? filteredBackups[0] ?? null;
 
   const [scheduleType, setScheduleType] = useState("daily");
 
@@ -96,6 +137,10 @@ export default function ServerBackup() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" className="bg-white dark:bg-[#121212] shadow-sm" onClick={() => void qc.invalidateQueries({ queryKey: ["servers", "backup", serverId] })}>
+            <RefreshCw size={16} className="mr-2" />
+            Refresh
+          </Button>
           <Button variant="outline" className="bg-white dark:bg-[#121212] shadow-sm">
             <FileText size={16} className="mr-2" />
             View Logs
@@ -115,6 +160,21 @@ export default function ServerBackup() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* LEFT COLUMN: Configuration */}
         <div className="xl:col-span-2 space-y-6">
+          <div className="bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl p-6 shadow-sm">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="space-y-2 flex-1">
+                <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
+                  Backup Path
+                </label>
+                <Input value={customPath} onChange={(e) => setCustomPath(e.target.value)} placeholder="/etc or /var/www" />
+              </div>
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={15} />
+                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search backups by name, status, path..." className="pl-10" />
+              </div>
+            </div>
+          </div>
+
           {/* 1. DATA SCOPE */}
           <div className="bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl p-6 shadow-sm">
             <div className="flex items-center gap-3 mb-6">
@@ -435,6 +495,51 @@ export default function ServerBackup() {
 
         {/* RIGHT COLUMN: Schedule & History */}
         <div className="space-y-6">
+          <div className="bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl p-6 shadow-sm">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-2.5 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-emerald-600 dark:text-emerald-400 border border-emerald-100/50 dark:border-emerald-900/30">
+                <History size={20} />
+              </div>
+              <h3 className="font-bold text-[16px] tracking-tight text-zinc-900 dark:text-white">
+                Backup Inventory
+              </h3>
+            </div>
+
+            {isLoading ? (
+              <div className="py-8 text-center text-sm text-zinc-500">Loading backups...</div>
+            ) : filteredBackups.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-zinc-200/70 bg-zinc-50/70 px-6 py-10 text-center text-sm text-zinc-500 dark:border-zinc-800/70 dark:bg-[#171717] dark:text-zinc-400">
+                Chưa có data backup
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredBackups.map((backup) => (
+                  <button
+                    key={backup.id}
+                    onClick={() => setSelectedBackupId(backup.id)}
+                    className={cn(
+                      "w-full rounded-xl border px-4 py-3 text-left transition-colors",
+                      selectedBackup?.id === backup.id
+                        ? "border-blue-400 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20"
+                        : "border-zinc-200/60 bg-zinc-50/40 hover:border-zinc-300 dark:border-zinc-800/60 dark:bg-[#1A1A1A] dark:hover:border-zinc-700",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-semibold text-zinc-900 dark:text-white">{backup.label || backup.id}</div>
+                        <div className="mt-1 text-[12px] text-zinc-500">{backup.path || "-"}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">{backup.status || "unknown"}</div>
+                        <div className="mt-1 text-[12px] text-zinc-500">{backup.created_at ? new Date(backup.created_at).toLocaleString() : "n/a"}</div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* 4. SCHEDULE */}
           <div className="bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl p-6 shadow-sm">
             <div className="flex items-center gap-3 mb-6">
@@ -531,8 +636,25 @@ export default function ServerBackup() {
                     Loading backups...
                 </div>
               ) : backups.length === 0 ? (
-                <div className="p-12 text-center text-sm font-medium text-zinc-500">
-                    No backups found
+                <div className="rounded-2xl border border-dashed border-zinc-200/70 bg-zinc-50/60 p-8 text-center dark:border-zinc-800/70 dark:bg-zinc-900/30">
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-zinc-400 shadow-sm dark:bg-zinc-950 dark:text-zinc-500">
+                    <History size={20} />
+                  </div>
+                  <div className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+                    Chưa có data backup
+                  </div>
+                  <div className="mt-2 text-xs leading-6 text-zinc-500 dark:text-zinc-400">
+                    Server này chưa có restore point nào được tạo. Bạn có thể chạy backup thủ công ngay bây giờ để bắt đầu lưu lịch sử sao lưu.
+                  </div>
+                  <Button
+                    variant="primary"
+                    className="mt-4 shadow-sm"
+                    onClick={handleRunBackup}
+                    disabled={isCreating}
+                  >
+                    <Play size={14} className={isCreating ? "mr-2 animate-pulse" : "mr-2"} />
+                    {isCreating ? "Backing up..." : "Run First Backup"}
+                  </Button>
                 </div>
               ) : (
                 backups.map((backup) => (
@@ -556,7 +678,7 @@ export default function ServerBackup() {
                     </div>
                     <div className="flex justify-between items-center text-[12px] text-zinc-500 font-medium">
                       <span className="flex items-center gap-1.5">
-                        <Clock size={12} /> {new Date(backup.created_at).toLocaleString()}
+                        <Clock size={12} /> {backup.created_at ? new Date(backup.created_at).toLocaleString() : "-"}
                       </span>
                       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button 
@@ -584,8 +706,63 @@ export default function ServerBackup() {
               )}
             </div>
           </div>
+
+          <div className="bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl p-6 shadow-sm">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600 dark:text-blue-400 border border-blue-100/50 dark:border-blue-900/30">
+                <Database size={20} />
+              </div>
+              <h3 className="font-bold text-[16px] tracking-tight text-zinc-900 dark:text-white">
+                Selected Backup
+              </h3>
+            </div>
+
+            {selectedBackup ? (
+              <div className="space-y-4">
+                <DetailRow label="Name" value={selectedBackup.label || selectedBackup.id} />
+                <DetailRow label="Path" value={selectedBackup.path || "-"} mono />
+                <DetailRow label="Status" value={selectedBackup.status || "unknown"} />
+                <DetailRow label="Type" value={selectedBackup.type || "full"} />
+                <DetailRow label="Size" value={formatBytes(selectedBackup.size ?? 0)} />
+                <DetailRow label="Created" value={selectedBackup.created_at ? new Date(selectedBackup.created_at).toLocaleString() : "n/a"} />
+                <div className="flex gap-2 pt-2">
+                  <Button variant="outline" onClick={() => void handleRestore(selectedBackup.id)}>
+                    <Download size={14} className="mr-2" />
+                    Restore
+                  </Button>
+                  <Button variant="danger" onClick={() => void handleDelete(selectedBackup.id)}>
+                    <Trash2 size={14} className="mr-2" />
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-zinc-500 dark:text-zinc-400">Select a backup to inspect details.</div>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
+}
+
+function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-zinc-100 pb-2 text-sm dark:border-zinc-800/60">
+      <span className="font-medium text-zinc-500">{label}</span>
+      <span className={cn("text-right text-zinc-900 dark:text-zinc-100", mono && "font-mono text-[12px]")}>{value}</span>
+    </div>
+  );
+}
+
+function formatBytes(bytes: number) {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }

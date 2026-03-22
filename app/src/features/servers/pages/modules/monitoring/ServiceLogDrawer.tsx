@@ -1,46 +1,36 @@
-import {
-  X,
-  FileText,
-  Download,
-  Copy,
-  RefreshCcw,
-  Pause,
-  Play,
-} from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Copy, Download, FileText, Pause, Play, RefreshCcw, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
 import { cn } from "@/lib/utils";
-import type { ServiceLog } from "../shared/mockServerService";
-import { mockServerService } from "../shared/mockServerService";
+import { servicesApi } from "@/shared/api/client";
+
+type LogLevel = "all" | "info" | "warn" | "error";
+type ParsedLogLine = {
+  timestamp: string;
+  level: "info" | "warn" | "error";
+  message: string;
+};
 
 interface ServiceLogDrawerProps {
   isOpen: boolean;
   onClose: () => void;
+  serverId: string;
   serviceName: string;
 }
 
-export function ServiceLogDrawer({
-  isOpen,
-  onClose,
-  serviceName,
-}: ServiceLogDrawerProps) {
+export function ServiceLogDrawer({ isOpen, onClose, serverId, serviceName }: ServiceLogDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [logs, setLogs] = useState<ServiceLog[]>([]);
+  const [logs, setLogs] = useState<ParsedLogLine[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [lineCount, setLineCount] = useState(100);
-  const [filterLevel, setFilterLevel] = useState<
-    "all" | "info" | "warn" | "error"
-  >("all");
+  const [filterLevel, setFilterLevel] = useState<LogLevel>("all");
   const [isFollowing, setIsFollowing] = useState(true);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // Close on click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        drawerRef.current &&
-        !drawerRef.current.contains(event.target as Node)
-      ) {
+      if (drawerRef.current && !drawerRef.current.contains(event.target as Node)) {
         onClose();
       }
     };
@@ -56,255 +46,206 @@ export function ServiceLogDrawer({
     };
   }, [isOpen, onClose]);
 
-  // Fetch logs
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !serverId || !serviceName) return;
 
+    let cancelled = false;
     const fetchLogs = async () => {
       setIsLoading(true);
       try {
-        const data = await mockServerService.getLogs(serviceName, lineCount);
-        setLogs(data);
+        const response = await servicesApi.logs(serverId, serviceName, lineCount);
+        if (cancelled) return;
+        const output = String(response.raw_output ?? response.result ?? "");
+        setLogs(parseLogOutput(output));
       } catch (error) {
-        console.error("Failed to fetch logs", error);
+        if (!cancelled) {
+          setLogs([
+            {
+              timestamp: new Date().toISOString(),
+              level: "error",
+              message: error instanceof Error ? error.message : "Unable to load service logs.",
+            },
+          ]);
+        }
       } finally {
-        setIsLoading(false);
+        if (!cancelled) {
+          setIsLoading(false);
+        }
       }
     };
 
-    fetchLogs();
+    void fetchLogs();
+    const interval = isFollowing ? window.setInterval(fetchLogs, 4000) : undefined;
+    return () => {
+      cancelled = true;
+      if (interval) window.clearInterval(interval);
+    };
+  }, [isOpen, serverId, serviceName, lineCount, refreshTrigger, isFollowing]);
 
-    // Polling if following
-    let interval: ReturnType<typeof setInterval>;
-    if (isFollowing) {
-      interval = setInterval(fetchLogs, 3000);
-    }
-
-    return () => clearInterval(interval);
-  }, [isOpen, serviceName, lineCount, refreshTrigger, isFollowing]);
-
-  // Auto-scroll to bottom
   useEffect(() => {
     if (isFollowing && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [logs, isFollowing]);
 
-  const filteredLogs = logs.filter(
-    (log) => filterLevel === "all" || log.level === filterLevel,
+  const filteredLogs = useMemo(
+    () => logs.filter((log) => filterLevel === "all" || log.level === filterLevel),
+    [logs, filterLevel],
   );
 
-  const handleCopy = () => {
-    const text = filteredLogs
-      .map((l) => `[${l.timestamp}] [${l.level.toUpperCase()}] ${l.message}`)
-      .join("\n");
-    navigator.clipboard.writeText(text);
+  const exportText = filteredLogs.map((line) => `[${line.timestamp}] [${line.level.toUpperCase()}] ${line.message}`).join("\n");
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(exportText);
   };
 
   const handleDownload = () => {
-    const text = filteredLogs
-      .map((l) => `[${l.timestamp}] [${l.level.toUpperCase()}] ${l.message}`)
-      .join("\n");
-    const blob = new Blob([text], { type: "text/plain" });
+    const blob = new Blob([exportText], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${serviceName}-logs-${new Date().toISOString()}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${serviceName}-logs-${new Date().toISOString()}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-sm transition-opacity duration-300">
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-sm">
       <div
         ref={drawerRef}
-        className="h-full w-full max-w-3xl bg-white dark:bg-zinc-900 shadow-2xl border-l border-zinc-200 dark:border-zinc-800 flex flex-col animate-in slide-in-from-right duration-300"
+        className="flex h-full w-full max-w-3xl flex-col border-l border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
       >
-        {/* Header */}
-        <div className="flex flex-col border-b border-zinc-200 dark:border-zinc-800">
+        <div className="border-b border-zinc-200 dark:border-zinc-800">
           <div className="flex items-center justify-between px-6 py-4">
             <div>
-              <h3 className="text-lg font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+              <h3 className="flex items-center gap-2 text-lg font-bold text-zinc-900 dark:text-white">
                 <FileText size={18} />
-                Service Logs:{" "}
-                <span className="text-blue-600 dark:text-blue-400 font-mono">
-                  {serviceName}
-                </span>
+                Service Logs
+                <span className="font-mono text-blue-600 dark:text-blue-400">{serviceName}</span>
               </h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                Viewing last {lineCount} lines •{" "}
-                {isFollowing ? "Live update" : "Paused"}
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                Viewing the latest {lineCount} lines through the real backend service log endpoint.
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={handleCopy}
-                className="p-2 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-100 dark:bg-zinc-800 rounded-lg transition-colors border border-transparent hover:border-zinc-200 dark:hover:border-zinc-300 dark:border-zinc-700"
-                title="Copy logs"
-              >
+              <button onClick={handleCopy} className="rounded-lg p-2 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200">
                 <Copy size={18} />
               </button>
-              <button
-                onClick={handleDownload}
-                className="p-2 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-100 dark:bg-zinc-800 rounded-lg transition-colors border border-transparent hover:border-zinc-200 dark:hover:border-zinc-300 dark:border-zinc-700"
-                title="Download logs"
-              >
+              <button onClick={handleDownload} className="rounded-lg p-2 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200">
                 <Download size={18} />
               </button>
-              <button
-                onClick={onClose}
-                className="p-2 ml-2 text-zinc-600 dark:text-zinc-400 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
-              >
+              <button onClick={onClose} className="rounded-lg p-2 text-zinc-500 transition hover:bg-red-50 hover:text-red-500 dark:text-zinc-400 dark:hover:bg-red-900/20 dark:hover:text-red-300">
                 <X size={20} />
               </button>
             </div>
           </div>
 
-          {/* Toolbar */}
-          <div className="px-6 py-3 bg-zinc-50 dark:bg-zinc-800/50 flex flex-wrap items-center gap-3 text-sm border-t border-zinc-200 dark:border-zinc-800">
+          <div className="flex flex-wrap items-center gap-3 border-t border-zinc-200 bg-zinc-50 px-6 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-800/40">
             <select
               value={lineCount}
-              onChange={(e) => setLineCount(Number(e.target.value))}
-              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-500 outline-none text-zinc-700 dark:text-zinc-300"
+              onChange={(event) => setLineCount(Number(event.target.value))}
+              className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-zinc-700 outline-none focus:ring-2 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
             >
               <option value={100}>Last 100 lines</option>
               <option value={500}>Last 500 lines</option>
               <option value={1000}>Last 1000 lines</option>
             </select>
 
-            <div className="h-4 w-px bg-zinc-300 dark:bg-zinc-700 mx-1"></div>
-
-            <div className="flex items-center bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md p-1">
-              <button
-                onClick={() => setFilterLevel("all")}
-                className={cn(
-                  "px-2 py-0.5 rounded text-xs font-medium transition-colors",
-                  filterLevel === "all"
-                    ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-white"
-                    : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-800 dark:text-zinc-200",
-                )}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setFilterLevel("info")}
-                className={cn(
-                  "px-2 py-0.5 rounded text-xs font-medium transition-colors",
-                  filterLevel === "info"
-                    ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400"
-                    : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-800 dark:text-zinc-200",
-                )}
-              >
-                Info
-              </button>
-              <button
-                onClick={() => setFilterLevel("warn")}
-                className={cn(
-                  "px-2 py-0.5 rounded text-xs font-medium transition-colors",
-                  filterLevel === "warn"
-                    ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400"
-                    : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-800 dark:text-zinc-200",
-                )}
-              >
-                Warn
-              </button>
-              <button
-                onClick={() => setFilterLevel("error")}
-                className={cn(
-                  "px-2 py-0.5 rounded text-xs font-medium transition-colors",
-                  filterLevel === "error"
-                    ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
-                    : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-800 dark:text-zinc-200",
-                )}
-              >
-                Error
-              </button>
+            <div className="flex items-center rounded-md border border-zinc-200 bg-white p-1 dark:border-zinc-700 dark:bg-zinc-900">
+              {(["all", "info", "warn", "error"] as LogLevel[]).map((level) => (
+                <button
+                  key={level}
+                  onClick={() => setFilterLevel(level)}
+                  className={cn(
+                    "rounded px-2 py-0.5 text-xs font-medium transition",
+                    filterLevel === level
+                      ? level === "warn"
+                        ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300"
+                        : level === "error"
+                          ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+                          : level === "info"
+                            ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
+                            : "bg-zinc-200 text-zinc-900 dark:bg-zinc-700 dark:text-white"
+                      : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200",
+                  )}
+                >
+                  {level}
+                </button>
+              ))}
             </div>
 
-            <div className="flex-1"></div>
+            <div className="flex-1" />
 
             <button
-              onClick={() => setIsFollowing(!isFollowing)}
+              onClick={() => setIsFollowing((value) => !value)}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-all",
+                "inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition",
                 isFollowing
-                  ? "bg-blue-600 border-blue-600 text-zinc-900 dark:text-white hover:bg-blue-700 shadow-sm"
-                  : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-100 dark:bg-zinc-800",
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : "border-zinc-200 bg-white text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200",
               )}
             >
               {isFollowing ? <Pause size={14} /> : <Play size={14} />}
               {isFollowing ? "Pause Follow" : "Resume Follow"}
             </button>
+
             <button
-              onClick={() => setRefreshTrigger((prev) => prev + 1)}
-              className="p-1.5 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-100 dark:bg-zinc-800 rounded-md transition-colors"
-              title="Refresh now"
+              onClick={() => setRefreshTrigger((value) => value + 1)}
+              className="inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
-              <RefreshCcw
-                size={16}
-                className={isLoading ? "animate-spin" : ""}
-              />
+              <RefreshCcw size={14} className={isLoading ? "animate-spin" : ""} />
+              Refresh
             </button>
           </div>
         </div>
 
-        {/* Content */}
-        <div
-          ref={scrollRef}
-          className="flex-1 overflow-y-auto p-4 bg-zinc-50 dark:bg-zinc-950 font-mono text-sm leading-relaxed"
-        >
-          {filteredLogs.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-zinc-500">
-              {isLoading
-                ? "Loading logs..."
-                : "No logs found matching your filter."}
-            </div>
+        <div ref={scrollRef} className="flex-1 overflow-auto bg-zinc-950 px-6 py-4 font-mono text-sm text-zinc-100">
+          {isLoading && logs.length === 0 ? (
+            <div className="py-10 text-center text-zinc-400">Loading logs...</div>
+          ) : filteredLogs.length === 0 ? (
+            <div className="py-10 text-center text-zinc-400">No log lines returned for this service yet.</div>
           ) : (
-            <div className="space-y-0.5">
-              {filteredLogs.map((log, index) => (
-                <div
-                  key={index}
-                  className="flex group hover:bg-zinc-900/50 -mx-4 px-4 py-0.5"
+            filteredLogs.map((log, index) => (
+              <div key={`${log.timestamp}-${index}`} className="mb-2 flex gap-3">
+                <span className="shrink-0 text-xs text-zinc-500">{log.timestamp}</span>
+                <span
+                  className={cn(
+                    "shrink-0 text-xs font-bold uppercase",
+                    log.level === "error" ? "text-red-400" : log.level === "warn" ? "text-yellow-400" : "text-blue-400",
+                  )}
                 >
-                  <span className="text-zinc-500 w-36 shrink-0 select-none text-xs pt-0.5">
-                    {new Date(log.timestamp).toLocaleTimeString()}
-                  </span>
-                  <span
-                    className={cn(
-                      "w-16 shrink-0 text-xs font-bold pt-0.5 select-none uppercase",
-                      log.level === "error"
-                        ? "text-red-500"
-                        : log.level === "warn"
-                          ? "text-yellow-500"
-                          : "text-blue-500",
-                    )}
-                  >
-                    [{log.level}]
-                  </span>
-                  <span
-                    className={cn(
-                      "break-all",
-                      log.level === "error"
-                        ? "text-red-200"
-                        : log.level === "warn"
-                          ? "text-yellow-200"
-                          : "text-zinc-700 dark:text-zinc-300",
-                    )}
-                  >
-                    {log.message}
-                  </span>
-                </div>
-              ))}
-              {/* Dummy element to scroll to */}
-              <div className="h-4"></div>
-            </div>
+                  {log.level}
+                </span>
+                <span className="whitespace-pre-wrap break-words">{log.message}</span>
+              </div>
+            ))
           )}
         </div>
       </div>
     </div>
   );
+}
+
+function parseLogOutput(output: string): ParsedLogLine[] {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const level = /\b(error|fatal)\b/i.test(line)
+        ? "error"
+        : /\b(warn|warning)\b/i.test(line)
+          ? "warn"
+          : "info";
+      const timestampMatch = line.match(/^\[?([0-9]{4}-[0-9]{2}-[0-9]{2}[^ ]*)\]?/);
+      return {
+        timestamp: timestampMatch?.[1] ?? new Date().toISOString(),
+        level,
+        message: line,
+      };
+    });
 }

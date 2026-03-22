@@ -200,6 +200,9 @@ func mapToControlMessage(m map[string]any) *agentpb.ControlMessage {
 				trigger.Context["params_json"] = string(raw)
 			}
 		}
+		if payloadJSON, ok := payload["payload_json"].(string); ok && payloadJSON != "" {
+			trigger.Context["payload_json"] = payloadJSON
+		}
 		cmd.Payload = &agentpb.ControlMessage_TriggerSkill{TriggerSkill: trigger}
 	}
 	return cmd

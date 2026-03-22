@@ -104,10 +104,14 @@ type ControlOperation struct {
 }
 
 type ControlOperationPayload struct {
-	CommandID string         `json:"command_id"`
-	Operation string         `json:"operation"`
-	TimeoutS  int            `json:"timeout_s"`
-	Params    map[string]any `json:"params"`
+	CommandID          string         `json:"command_id"`
+	Operation          string         `json:"operation"`
+	TimeoutS           int            `json:"timeout_s"`
+	Params             map[string]any `json:"params"`
+	TenantID           string         `json:"tenant_id,omitempty"`
+	ServerGroups       []string       `json:"server_groups,omitempty"`
+	RequiredCapability string         `json:"required_capability,omitempty"`
+	ActorRole          string         `json:"actor_role,omitempty"`
 }
 
 const TypedControlSchemaVersion = "typed-control/v1"

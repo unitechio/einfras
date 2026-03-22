@@ -1,4 +1,5 @@
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart } from "recharts";
+import { Bar } from "recharts/es6/cartesian/Bar";
 import { useParams } from 'react-router-dom';
 import { useServerMetrics } from '../api/useServerHooks';
 import { useState, useEffect } from 'react';

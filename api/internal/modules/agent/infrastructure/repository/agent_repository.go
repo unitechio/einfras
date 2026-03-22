@@ -65,6 +65,17 @@ func (r *commandRepo) FindByID(ctx context.Context, id string) (*agent.Command, 
 	return &cmd, nil
 }
 
+func (r *commandRepo) FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (*agent.Command, error) {
+	var cmd agent.Command
+	if err := r.db.WithContext(ctx).Table("agent_commands").
+		Where("idempotency_key = ?", idempotencyKey).
+		Order("created_at DESC").
+		First(&cmd).Error; err != nil {
+		return nil, fmt.Errorf("command with idempotency key %q not found: %w", idempotencyKey, err)
+	}
+	return &cmd, nil
+}
+
 func (r *commandRepo) ListByServer(ctx context.Context, serverID string, limit int) ([]*agent.Command, error) {
 	var cmds []*agent.Command
 	if err := r.db.WithContext(ctx).Table("agent_commands").

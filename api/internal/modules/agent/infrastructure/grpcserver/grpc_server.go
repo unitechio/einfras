@@ -18,12 +18,15 @@ import (
 	agentregistry "einfra/api/internal/modules/agent/application"
 	"einfra/api/internal/modules/agent/domain"
 	agentpb "einfra/api/internal/modules/agent/infrastructure/grpcpb"
+	serverdomain "einfra/api/internal/modules/server/domain"
+	"einfra/api/internal/platform/loggingx"
 )
 
 // AgentInfoUpdater updates agent info in the database on connect/disconnect.
 type AgentInfoUpdater interface {
 	Upsert(serverID string, info *agent.AgentInfo) error
 	SetOnline(serverID string, online bool) error
+	GetByServerID(serverID string) (*agent.AgentInfo, error)
 }
 
 // AgentTokenValidatorGRPC validates tokens extracted from gRPC metadata.
@@ -42,6 +45,11 @@ type ServiceUpdater interface {
 	UpdateServices(ctx context.Context, serverID string, services []*agentpb.ServiceEntry) error
 }
 
+type ServerSnapshotRepository interface {
+	GetByID(ctx context.Context, id string) (*serverdomain.Server, error)
+	Update(ctx context.Context, server *serverdomain.Server) error
+}
+
 // Server implements agentpb.AgentServiceServer.
 type Server struct {
 	agentpb.UnimplementedAgentServiceServer
@@ -50,6 +58,7 @@ type Server struct {
 	tokenSvc    AgentTokenValidatorGRPC
 	cmdRepo     CommandUpdater
 	serviceRepo ServiceUpdater
+	serverRepo  ServerSnapshotRepository
 	grpcServer  *grpc.Server
 }
 
@@ -60,6 +69,7 @@ func New(
 	tokenSvc AgentTokenValidatorGRPC,
 	cmdRepo CommandUpdater,
 	serviceRepo ServiceUpdater,
+	serverRepo ServerSnapshotRepository,
 ) *Server {
 	return &Server{
 		hub:         hub,
@@ -67,6 +77,7 @@ func New(
 		tokenSvc:    tokenSvc,
 		cmdRepo:     cmdRepo,
 		serviceRepo: serviceRepo,
+		serverRepo:  serverRepo,
 	}
 }
 
@@ -88,7 +99,9 @@ func (s *Server) Start(addr string) error {
 
 	agentpb.RegisterAgentServiceServer(s.grpcServer, s)
 
-	log.Info().Str("addr", addr).Msg("[grpc-server] agent gRPC server starting")
+	loggingx.New("grpc-server").Info(log.Logger, "grpc-listener", "", "starting", map[string]any{
+		"addr": addr,
+	})
 	return s.grpcServer.Serve(lis)
 }
 
@@ -108,17 +121,17 @@ func (s *Server) ConnectStream(stream agentpb.AgentService_ConnectStreamServer) 
 
 	if s.tokenSvc != nil {
 		if err := s.tokenSvc.Validate(stream.Context(), serverID, rawToken); err != nil {
-			log.Warn().Str("server_id", serverID).Err(err).Msg("[grpc-server] auth rejected")
+			loggingx.New("grpc-server").Warn(log.Logger, "grpc-auth", serverID, "rejected", map[string]any{
+				"reason": err.Error(),
+			})
 			return status.Errorf(codes.Unauthenticated, "invalid agent token")
 		}
 	}
 
-	// Ideally, hub.RegisterGRPCAgent is mapped to handle ConnectStreamServer properly
-	// The implementation of Hub internally stores this stream to dispatch TriggerSkill.
-	// conn := s.hub.RegisterGRPCAgent(serverID, stream)
+	s.hub.RegisterGRPCAgent(serverID, stream)
 
 	defer func() {
-		// s.hub.UnregisterGRPCAgent(serverID)
+		s.hub.UnregisterGRPCAgent(serverID)
 		_ = s.agentRepo.SetOnline(serverID, false)
 		s.hub.BroadcastToClients(serverID, map[string]any{
 			"type":      "AGENT_OFFLINE",
@@ -126,7 +139,9 @@ func (s *Server) ConnectStream(stream agentpb.AgentService_ConnectStreamServer) 
 			"server_id": serverID,
 			"ts":        time.Now().UnixMilli(),
 		})
-		log.Info().Str("server_id", serverID).Msg("[grpc-server] agent disconnected")
+		loggingx.New("grpc-server").Info(log.Logger, "grpc-connection", serverID, "disconnected", map[string]any{
+			"transport": "grpc",
+		})
 	}()
 
 	s.hub.BroadcastToClients(serverID, map[string]any{
@@ -135,7 +150,9 @@ func (s *Server) ConnectStream(stream agentpb.AgentService_ConnectStreamServer) 
 		"server_id": serverID,
 		"ts":        time.Now().UnixMilli(),
 	})
-	log.Info().Str("server_id", serverID).Msg("[grpc-server] agent connected via gRPC")
+	loggingx.New("grpc-server").Info(log.Logger, "grpc-connection", serverID, "connected", map[string]any{
+		"transport": "grpc",
+	})
 
 	for {
 		event, err := stream.Recv()
@@ -147,7 +164,9 @@ func (s *Server) ConnectStream(stream agentpb.AgentService_ConnectStreamServer) 
 		}
 
 		if err := s.handleEvent(stream.Context(), serverID, event); err != nil {
-			log.Error().Str("server_id", serverID).Err(err).Msg("[grpc-server] event handling error")
+			loggingx.New("grpc-server").Error(log.Logger, "grpc-event", serverID, "error", map[string]any{
+				"reason": err.Error(),
+			})
 		}
 	}
 }
@@ -170,6 +189,13 @@ func (s *Server) handleEvent(ctx context.Context, serverID string, event *agentp
 			Capabilities: reg.Capabilities,
 		}
 		_ = s.agentRepo.Upsert(serverID, info)
+		s.syncServerSnapshot(ctx, serverID, reg.AgentVersion, reg.Os, reg.Arch, 0, 0, 0)
+		loggingx.New("grpc-server").Info(log.Logger, "agent-register", serverID, "updated", map[string]any{
+			"version":      reg.AgentVersion,
+			"os":           reg.Os,
+			"arch":         reg.Arch,
+			"capabilities": reg.Capabilities,
+		})
 		s.hub.BroadcastToClients(serverID, map[string]any{
 			"type":         "AGENT_REGISTERED",
 			"server_id":    serverID,
@@ -181,13 +207,59 @@ func (s *Server) handleEvent(ctx context.Context, serverID string, event *agentp
 
 	case *agentpb.AgentEvent_Heartbeat:
 		hb := p.Heartbeat
-		info := &agent.AgentInfo{ServerID: serverID, Online: true, LastSeen: time.Now()}
+		now := time.Now()
+		info := &agent.AgentInfo{
+			ServerID: serverID,
+			Online:   true,
+			LastSeen: now,
+		}
+		if existing, err := s.agentRepo.GetByServerID(serverID); err == nil && existing != nil {
+			info.Version = existing.Version
+			info.OS = existing.OS
+			info.Arch = existing.Arch
+			info.HasDocker = existing.HasDocker
+			info.HasK8s = existing.HasK8s
+			info.Capabilities = append([]string(nil), existing.Capabilities...)
+		}
+		if hb.GetAgentVersion() != "" {
+			info.Version = hb.GetAgentVersion()
+		}
+		if hb.GetOs() != "" {
+			info.OS = hb.GetOs()
+		}
+		if hb.GetArch() != "" {
+			info.Arch = hb.GetArch()
+		}
+		info.HasDocker = hb.GetHasDocker()
+		info.HasK8s = hb.GetHasK8S()
+		info.CPUPercent = float64(hb.CpuPercent)
+		info.MemPercent = float64(hb.MemPercent)
+		info.DiskPercent = float64(hb.GetDiskPercent())
 		_ = s.agentRepo.Upsert(serverID, info)
+		s.syncServerSnapshot(ctx, serverID, info.Version, info.OS, info.Arch, int(hb.GetCpuCores()), float64(hb.GetMemoryGb()), int(hb.GetDiskGb()))
+		loggingx.New("grpc-server").Debug(log.Logger, "agent-heartbeat", serverID, "received", map[string]any{
+			"cpu_percent":  hb.CpuPercent,
+			"mem_percent":  hb.MemPercent,
+			"disk_percent": hb.GetDiskPercent(),
+			"cpu_cores":    hb.GetCpuCores(),
+			"memory_gb":    hb.GetMemoryGb(),
+			"disk_gb":      hb.GetDiskGb(),
+			"has_docker":   hb.GetHasDocker(),
+			"has_k8s":      hb.GetHasK8S(),
+			"os":           hb.GetOs(),
+			"arch":         hb.GetArch(),
+			"version":      hb.GetAgentVersion(),
+			"uptime_s":     hb.UptimeSeconds,
+		})
 		s.hub.BroadcastToClients(serverID, map[string]any{
 			"type":      "HEARTBEAT",
 			"server_id": serverID,
 			"cpu":       hb.CpuPercent,
 			"mem":       hb.MemPercent,
+			"disk":      hb.GetDiskPercent(),
+			"os":        hb.GetOs(),
+			"arch":      hb.GetArch(),
+			"version":   hb.GetAgentVersion(),
 			"uptime_s":  hb.UptimeSeconds,
 		})
 
@@ -247,6 +319,51 @@ func (s *Server) handleEvent(ctx context.Context, serverID string, event *agentp
 		})
 	}
 	return nil
+}
+
+func (s *Server) syncServerSnapshot(ctx context.Context, serverID, version, osName, arch string, cpuCores int, memoryGB float64, diskGB int) {
+	if s.serverRepo == nil {
+		return
+	}
+	server, err := s.serverRepo.GetByID(ctx, serverID)
+	if err != nil || server == nil {
+		return
+	}
+	changed := false
+	if version != "" && server.AgentVersion != version {
+		server.AgentVersion = version
+		changed = true
+	}
+	if osName != "" && server.OS != serverdomain.ServerOS(osName) {
+		server.OS = serverdomain.ServerOS(osName)
+		changed = true
+	}
+	if cpuCores > 0 && server.CPUCores != cpuCores {
+		server.CPUCores = cpuCores
+		changed = true
+	}
+	if memoryGB > 0 && server.MemoryGB != memoryGB {
+		server.MemoryGB = memoryGB
+		changed = true
+	}
+	if diskGB > 0 && server.DiskGB != diskGB {
+		server.DiskGB = diskGB
+		changed = true
+	}
+	if server.OnboardingStatus != serverdomain.ServerOnboardingStatusInstalled {
+		server.OnboardingStatus = serverdomain.ServerOnboardingStatusInstalled
+		changed = true
+	}
+	if server.Status != serverdomain.ServerStatusOnline {
+		server.Status = serverdomain.ServerStatusOnline
+		changed = true
+	}
+	now := time.Now()
+	server.LastCheckAt = &now
+	server.UpdatedAt = now
+	if changed {
+		_ = s.serverRepo.Update(ctx, server)
+	}
 }
 
 func extractCredentials(ctx context.Context) (serverID, rawToken string, err error) {

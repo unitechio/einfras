@@ -5,24 +5,20 @@ package agenthandler
 import (
 	"encoding/json"
 	"net/http"
+
+	"einfra/api/internal/platform/apierrors"
 )
 
-type errorDetail struct {
-	Code    string         `json:"code"`
-	Message string         `json:"message"`
-	Details map[string]any `json:"details,omitempty"`
-}
-
 type responseEnvelope struct {
-	Status   string         `json:"status"`
-	Resource string         `json:"resource,omitempty"`
-	Action   string         `json:"action,omitempty"`
-	Item     any            `json:"item,omitempty"`
-	Items    any            `json:"items,omitempty"`
-	Command  any            `json:"command,omitempty"`
-	Result   any            `json:"result,omitempty"`
-	Meta     map[string]any `json:"meta,omitempty"`
-	Error    *errorDetail   `json:"error,omitempty"`
+	Status   string            `json:"status"`
+	Resource string            `json:"resource,omitempty"`
+	Action   string            `json:"action,omitempty"`
+	Item     any               `json:"item,omitempty"`
+	Items    any               `json:"items,omitempty"`
+	Command  any               `json:"command,omitempty"`
+	Result   any               `json:"result,omitempty"`
+	Meta     map[string]any    `json:"meta,omitempty"`
+	Error    *apierrors.Detail `json:"error,omitempty"`
 }
 
 func itemEnvelope(status, resource string, item any, meta map[string]any) responseEnvelope {
@@ -38,15 +34,21 @@ func actionEnvelope(status, resource, action string, command, result any, meta m
 }
 
 func errorEnvelope(resource, action, code, message string, details map[string]any) responseEnvelope {
-	return responseEnvelope{
+	envelope := apierrors.Envelope{
 		Status:   "error",
 		Resource: resource,
 		Action:   action,
-		Error: &errorDetail{
+		Error: &apierrors.Detail{
 			Code:    code,
 			Message: message,
 			Details: details,
 		},
+	}
+	return responseEnvelope{
+		Status:   envelope.Status,
+		Resource: envelope.Resource,
+		Action:   envelope.Action,
+		Error:    envelope.Error,
 	}
 }
 
@@ -57,7 +59,9 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
 }
 
 func writeError(w http.ResponseWriter, statusCode int, resource, action, code, message string, details map[string]any) {

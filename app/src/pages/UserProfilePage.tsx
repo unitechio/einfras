@@ -14,7 +14,6 @@ export default function UserProfilePage() {
         { id: "light", label: "Light Theme", icon: "☀️" },
         { id: "dark", label: "Dark Theme", icon: "🌙" },
         { id: "contrast", label: "High Contrast", icon: "👁️" },
-        { id: "system", label: "System Theme", icon: "🔄" },
     ];
 
     return (
@@ -41,7 +40,7 @@ export default function UserProfilePage() {
                             }}
                             className={`
                 relative p-4 rounded-lg border-2 text-left transition-all
-                ${(theme === option.id && option.id !== 'system') || (option.id === 'system' && false)
+                ${theme === option.id
                                     ? "border-blue-500 bg-blue-50 dark:bg-blue-900/10 ring-1 ring-blue-500"
                                     : "border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600"}
               `}

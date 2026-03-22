@@ -14,6 +14,7 @@ import {
   Plus,
   CheckSquare,
   MinusSquare,
+  Search,
 } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
@@ -21,12 +22,15 @@ import { useServerServices, useServiceAction } from "../../../api/useServerHooks
 import { ServiceLogDrawer } from "../monitoring/ServiceLogDrawer";
 import { ServiceDetailsModal } from "./ServiceDetailsModal";
 import { AddServiceWizard } from "./AddServiceWizard";
+import { useNotification } from "@/core/NotificationContext";
 import { cn } from "@/lib/utils";
 import { Button } from "@/shared/ui/Button";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/shared/ui/Table";
+import { servicesApi } from "@/shared/api/client";
 
 export default function ServerServices() {
   const { serverId } = useParams<{ serverId: string }>();
+  const { showNotification } = useNotification();
 
   // Real Hooks
   const {
@@ -62,6 +66,7 @@ export default function ServerServices() {
     service: string; // 'bulk' for bulk actions
     isOpen: boolean;
   } | null>(null);
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
 
   const handleAction = async (
     action: "start" | "stop" | "restart" | "reload" | "enable" | "disable",
@@ -175,13 +180,58 @@ export default function ServerServices() {
             Manage system daemons, view logs, and monitor health.
           </p>
         </div>
-        <Button
-          variant="primary"
-          onClick={() => setShowWizard(true)}
-          className="shadow-sm"
-        >
-          <Plus size={16} className="mr-2" /> Add Service
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={async () => {
+              await refetch();
+              showNotification({
+                type: "success",
+                message: "Service inventory refreshed",
+                description: "Latest service state was loaded from the backend.",
+              });
+            }}
+            disabled={isLoading || discoveryLoading}
+          >
+            <RefreshCcw size={16} className="mr-2" />
+            Refresh
+          </Button>
+          <Button
+            variant="outline"
+            onClick={async () => {
+              if (!serverId) return;
+              setDiscoveryLoading(true);
+              try {
+                await servicesApi.discovery(serverId);
+                await refetch();
+                showNotification({
+                  type: "success",
+                  message: "Service discovery queued",
+                  description: "The node is syncing new system services now.",
+                });
+              } catch (error) {
+                showNotification({
+                  type: "error",
+                  message: "Service discovery failed",
+                  description: error instanceof Error ? error.message : "Request failed.",
+                });
+              } finally {
+                setDiscoveryLoading(false);
+              }
+            }}
+            disabled={isLoading || discoveryLoading}
+          >
+            {discoveryLoading ? <RefreshCcw size={16} className="mr-2 animate-spin" /> : <Search size={16} className="mr-2" />}
+            Discover
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => setShowWizard(true)}
+            className="shadow-sm"
+          >
+            <Plus size={16} className="mr-2" /> Add Service
+          </Button>
+        </div>
       </div>
 
       <div className="bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl shadow-sm overflow-hidden transition-all">
@@ -521,6 +571,7 @@ export default function ServerServices() {
         <ServiceLogDrawer
           isOpen={!!selectedServiceLogs}
           onClose={() => setSelectedServiceLogs(null)}
+          serverId={serverId || ""}
           serviceName={selectedServiceLogs}
         />
       )}
@@ -535,7 +586,14 @@ export default function ServerServices() {
       )}
 
       {/* Add Service Wizard */}
-      <AddServiceWizard isOpen={showWizard} onClose={() => setShowWizard(false)} />
+      <AddServiceWizard
+        isOpen={showWizard}
+        onClose={() => setShowWizard(false)}
+        serverId={serverId || ""}
+        onInstalled={async () => {
+          await refetch();
+        }}
+      />
 
       {/* Confirmation Modal */}
       {confirmAction && (

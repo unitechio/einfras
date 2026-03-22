@@ -10,7 +10,7 @@ server:
   mode: "debug"  # debug, release, test
 
 db:
-  postgres_url: "postgres://einfra:einfra123@localhost:5432/einfra_crm?sslmode=disable"
+  postgres_url: "postgres://einfra:einfra123@localhost:5433/einfra_crm?sslmode=disable"
   max_open_conns: 25
   max_idle_conns: 5
   conn_max_lifetime: 300  # seconds
@@ -80,12 +80,17 @@ monitoring:
 logging:
   level: "info"  # debug, info, warn, error, fatal
   format: "json"  # json, text
-  output: "stdout"  # stdout, file
-  file_path: "./logs/app.log"
+  output: "both"  # stdout, file, both
+  file_path: "./logs/api.log"
   max_size_mb: 100
   max_backups: 3
   max_age_days: 28
   compress: true
+
+elasticsearch:
+  enabled: false
+  endpoint: "http://localhost:9200"
+  index_prefix: "einfra-api"
 
 rate_limit:
   enabled: true

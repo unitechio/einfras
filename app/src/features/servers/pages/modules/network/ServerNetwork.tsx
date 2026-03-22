@@ -7,7 +7,7 @@ export default function ServerNetwork() {
   const { data: interfacesData, isLoading } = useServerNetworkInterfaces(serverId || "");
   const interfaces = interfacesData || [];
 
-  const formatBytes = (bytes: number) => {
+  const formatBytes = (bytes?: number) => {
     if (!bytes) return "0 B";
     const k = 1024;
     const sizes = ["B", "KB", "MB", "GB", "TB"];
@@ -37,6 +37,10 @@ export default function ServerNetwork() {
                <div key={i} className="bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl p-6 shadow-sm min-h-[220px] isolate overflow-hidden animate-pulse">
                </div>
              ))
+        ) : interfaces.length === 0 ? (
+          <div className="col-span-full rounded-xl border border-dashed border-zinc-200/70 bg-zinc-50/70 px-6 py-10 text-center text-sm text-zinc-500 dark:border-zinc-800/70 dark:bg-[#171717] dark:text-zinc-400">
+            No network interface snapshot is available yet. Trigger a network refresh or wait for the agent to sync the latest interfaces.
+          </div>
         ) : (
           interfaces.map((iface) => (
             <div

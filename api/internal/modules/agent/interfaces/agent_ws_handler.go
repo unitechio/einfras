@@ -13,6 +13,7 @@ import (
 
 	agentregistry "einfra/api/internal/modules/agent/application"
 	"einfra/api/internal/modules/agent/domain"
+	"einfra/api/internal/platform/loggingx"
 )
 
 var upgrader = websocket.Upgrader{
@@ -76,11 +77,10 @@ func (h *AgentWSHandler) HandleAgentWS(w http.ResponseWriter, r *http.Request) {
 	// Agents must present: Authorization: Bearer <token>
 	if h.tokenSvc != nil {
 		if err := h.tokenSvc.ValidateFromHeader(r.Context(), serverID, r.Header.Get("Authorization")); err != nil {
-			log.Warn().
-				Str("server_id", serverID).
-				Str("remote", r.RemoteAddr).
-				Err(err).
-				Msg("[agent-ws] unauthorized connection attempt")
+			loggingx.New("agent-ws").Warn(log.Logger, "ws-auth", serverID, "rejected", map[string]any{
+				"remote": r.RemoteAddr,
+				"reason": err.Error(),
+			})
 			writeError(w, http.StatusUnauthorized, "agent_ws", "agent_ws.connect", "unauthorized", "unauthorized", map[string]any{"server_id": serverID})
 			return
 		}
@@ -88,16 +88,18 @@ func (h *AgentWSHandler) HandleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[agent-ws] upgrade failed for %s: %v", serverID, err)
+		loggingx.New("agent-ws").Error(log.Logger, "ws-upgrade", serverID, "error", map[string]any{
+			"remote": r.RemoteAddr,
+			"reason": err.Error(),
+		})
 		return
 	}
 
 	ac := h.hub.RegisterAgent(serverID, conn)
 	_ = h.agentRepo.SetOnline(serverID, true)
-	log.Info().
-		Str("server_id", serverID).
-		Str("remote", r.RemoteAddr).
-		Msg("[agent-ws] agent connected")
+	loggingx.New("agent-ws").Info(log.Logger, "ws-connection", serverID, "connected", map[string]any{
+		"remote": r.RemoteAddr,
+	})
 
 	// Notify clients that this server came online
 	h.hub.BroadcastToClients(serverID, map[string]any{
@@ -110,9 +112,7 @@ func (h *AgentWSHandler) HandleAgentWS(w http.ResponseWriter, r *http.Request) {
 		conn.Close()
 		h.hub.UnregisterAgent(serverID)
 		_ = h.agentRepo.SetOnline(serverID, false)
-		log.Info().
-			Str("server_id", serverID).
-			Msg("[agent-ws] agent disconnected")
+		loggingx.New("agent-ws").Info(log.Logger, "ws-connection", serverID, "disconnected", map[string]any{})
 		h.hub.BroadcastToClients(serverID, map[string]any{
 			"type":      "AGENT_OFFLINE",
 			"server_id": serverID,
@@ -147,9 +147,12 @@ func (h *AgentWSHandler) HandleAgentWS(w http.ResponseWriter, r *http.Request) {
 		var msg agent.AgentMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			log.Warn().
+				Str("component", "agent-ws").
+				Str("event", "ws-message").
 				Str("server_id", serverID).
-				Err(err).
-				Msg("[agent-ws] bad message")
+				Str("status", "invalid").
+				Interface("details", map[string]any{"reason": err.Error()}).
+				Send()
 			continue
 		}
 		msg.ServerID = serverID

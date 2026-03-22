@@ -95,6 +95,15 @@ message Heartbeat {
     float cpu_percent = 1;
     float mem_percent = 2;
     int64 uptime_seconds = 3;
+    float disk_percent = 4;
+    int32 cpu_cores = 5;
+    float memory_gb = 6;
+    int32 disk_gb = 7;
+    bool has_docker = 8;
+    bool has_k8s = 9;
+    string os = 10;
+    string arch = 11;
+    string agent_version = 12;
 }
 
 // Streamed incrementally as standard out/err arrives.

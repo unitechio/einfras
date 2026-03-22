@@ -48,7 +48,7 @@ func (m *ControlManager) FileRead(ctx context.Context, serverID, userID, filePat
 	return m.dispatchOperation(ctx, serverID, userID, "file.read", "file", filePath, map[string]any{
 		"path":  filePath,
 		"lines": lines,
-	}, 120, "file-read:"+serverID+":"+filePath)
+	}, 120, commandKey("file-read", serverID, filePath))
 }
 
 func (m *ControlManager) FileList(ctx context.Context, serverID, userID, dirPath string, depth int) (*agent.Command, error) {
@@ -58,44 +58,49 @@ func (m *ControlManager) FileList(ctx context.Context, serverID, userID, dirPath
 	return m.dispatchOperation(ctx, serverID, userID, "file.list", "directory", dirPath, map[string]any{
 		"path":  dirPath,
 		"depth": depth,
-	}, 180, "file-list:"+serverID+":"+dirPath)
+	}, 180, commandKey("file-list", serverID, dirPath))
 }
 
 func (m *ControlManager) FileWrite(ctx context.Context, serverID, userID, filePath, content string) (*agent.Command, error) {
 	return m.dispatchOperation(ctx, serverID, userID, "file.write", "file", filePath, map[string]any{
 		"path":    filePath,
 		"content": content,
-	}, 180, "file-write:"+serverID+":"+filePath)
+	}, 180, commandKey("file-write", serverID, filePath))
 }
 
 func (m *ControlManager) FileChmod(ctx context.Context, serverID, userID, filePath, mode string) (*agent.Command, error) {
 	return m.dispatchOperation(ctx, serverID, userID, "file.chmod", "file", filePath, map[string]any{
 		"path": filePath,
 		"mode": mode,
-	}, 60, "file-chmod:"+serverID+":"+filePath)
+	}, 60, commandKey("file-chmod", serverID, filePath))
 }
 
 func (m *ControlManager) Terminal(ctx context.Context, serverID, userID, command string, timeoutSec int) (*agent.Command, error) {
-	return m.dispatch(ctx, serverID, userID, "terminal.exec", "", command, defaultTimeout(timeoutSec, 600), "terminal:"+uuid.NewString())
+	return m.dispatch(ctx, serverID, userID, "terminal.exec", "", command, defaultTimeout(timeoutSec, 600), commandKey("terminal", serverID))
 }
 
 func (m *ControlManager) ProcessAction(ctx context.Context, serverID, userID string, pid int, signal string) (*agent.Command, error) {
 	return m.dispatchOperation(ctx, serverID, userID, "process.signal", "process", fmt.Sprintf("%d", pid), map[string]any{
 		"pid":    pid,
 		"signal": signal,
-	}, 60, fmt.Sprintf("process-signal:%s:%d:%s", serverID, pid, signal))
+	}, 60, commandKey("process-signal", serverID, fmt.Sprintf("%d", pid), signal))
 }
 
 func (m *ControlManager) PackageAction(ctx context.Context, serverID, userID, action, packageName string) (*agent.Command, error) {
 	action = strings.ToLower(strings.TrimSpace(action))
 	packageName = strings.TrimSpace(packageName)
+	if action == "list" {
+		return m.dispatchOperation(ctx, serverID, userID, "package.list", "package", "", map[string]any{
+			"action": action,
+		}, 180, commandKey("package-list", serverID))
+	}
 	if packageName == "" {
 		return nil, errors.New("package_name is required")
 	}
 	return m.dispatchOperation(ctx, serverID, userID, "package."+action, "package", packageName, map[string]any{
 		"action":       action,
 		"package_name": packageName,
-	}, 1800, fmt.Sprintf("package:%s:%s:%s", serverID, action, packageName))
+	}, 1800, commandKey("package", serverID, action, packageName))
 }
 
 func (m *ControlManager) TailLog(ctx context.Context, serverID, userID, logPath string, lines int) (*agent.Command, error) {
@@ -105,12 +110,19 @@ func (m *ControlManager) TailLog(ctx context.Context, serverID, userID, logPath 
 	return m.dispatchOperation(ctx, serverID, userID, "log.tail", "log_file", logPath, map[string]any{
 		"path":  logPath,
 		"lines": lines,
-	}, 120, "log-tail:"+serverID+":"+logPath)
+	}, 120, commandKey("log-tail", serverID, logPath))
 }
 
 func (m *ControlManager) AccessAction(ctx context.Context, serverID, userID, action, target, payload string) (*agent.Command, error) {
 	switch action {
 	case "list-users":
+	case "list-groups":
+	case "add-user":
+	case "update-user":
+	case "delete-user":
+	case "add-group":
+	case "update-group":
+	case "delete-group":
 	case "list-ssh-keys":
 	case "add-ssh-key":
 	default:
@@ -120,7 +132,7 @@ func (m *ControlManager) AccessAction(ctx context.Context, serverID, userID, act
 		"action":  action,
 		"target":  target,
 		"payload": payload,
-	}, 180, fmt.Sprintf("access:%s:%s:%s", serverID, action, target))
+	}, 180, commandKey("access", serverID, action, target))
 }
 
 func (m *ControlManager) ConfigAction(ctx context.Context, serverID, userID, action, target, payload string) (*agent.Command, error) {
@@ -135,7 +147,7 @@ func (m *ControlManager) ConfigAction(ctx context.Context, serverID, userID, act
 		"action":  action,
 		"target":  target,
 		"payload": payload,
-	}, 180, fmt.Sprintf("config:%s:%s:%s", serverID, action, target))
+	}, 180, commandKey("config", serverID, action, target))
 }
 
 func (m *ControlManager) PluginAction(ctx context.Context, serverID, userID, action, target string) (*agent.Command, error) {
@@ -150,7 +162,7 @@ func (m *ControlManager) PluginAction(ctx context.Context, serverID, userID, act
 	return m.dispatchOperation(ctx, serverID, userID, "plugin."+action, "plugin", target, map[string]any{
 		"action": action,
 		"target": target,
-	}, 180, fmt.Sprintf("plugin:%s:%s:%s", serverID, action, target))
+	}, 180, commandKey("plugin", serverID, action, target))
 }
 
 func (m *ControlManager) dispatch(ctx context.Context, serverID, userID, action, resourceID, command string, timeoutSec int, idempotencyKey string) (*agent.Command, error) {
@@ -190,7 +202,16 @@ func (m *ControlManager) dispatchOperation(ctx context.Context, serverID, userID
 		m.writeAudit(ctx, server, userID, ActorRoleFromContext(ctx), action, resourceType, resourceID, "denied", policyDecision, policyReason, requiredCapability, params, err.Error())
 		return nil, err
 	}
-	cmd, err := m.dispatcher.DispatchOperation(ctx, serverID, userID, action, params, timeoutSec, idempotencyKey)
+	payload := agent.ControlOperationPayload{
+		Operation:          action,
+		TimeoutS:           timeoutSec,
+		Params:             params,
+		TenantID:           server.TenantID,
+		ServerGroups:       append([]string(nil), server.Tags...),
+		RequiredCapability: requiredCapability,
+		ActorRole:          ActorRoleFromContext(ctx),
+	}
+	cmd, err := m.dispatcher.DispatchOperation(ctx, serverID, userID, payload, idempotencyKey)
 	status := "accepted"
 	details := action
 	if err != nil {
@@ -358,6 +379,12 @@ func (m *ControlManager) writeAudit(ctx context.Context, server *domain.Server, 
 		Details:             details,
 		CreatedAt:           time.Now().UTC(),
 	})
+}
+
+func commandKey(parts ...string) string {
+	all := append([]string(nil), parts...)
+	all = append(all, uuid.NewString())
+	return strings.Join(all, ":")
 }
 
 func sanitizeAuditParams(params map[string]any) map[string]any {

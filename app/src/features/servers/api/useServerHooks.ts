@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Server } from "../types";
 import { serverKeys } from "./useServers";
+import type { FirewallRule } from "@/types/firewall.types";
 import {
   serversApi,
   servicesApi,
@@ -295,7 +296,20 @@ export const useConnectivityHistory = (serverId: string) =>
 export const useFirewallRules = (serverId: string) =>
   useQuery({
     queryKey: ["servers", "firewall", serverId],
-    queryFn: () => iptablesApi.list(serverId),
+    queryFn: async (): Promise<FirewallRule[]> => {
+      const rules = await iptablesApi.list(serverId);
+      return rules.map((rule, idx) => ({
+        id: rule.id,
+        priority: rule.position ?? idx + 1,
+        direction: (rule.chain === "OUTPUT" ? "OUTBOUND" : "INBOUND") as FirewallRule["direction"],
+        protocol: ((rule.protocol || "ANY").toUpperCase() as FirewallRule["protocol"]),
+        port: rule.dest_port || rule.source_port || "*",
+        source: rule.source_ip || rule.dest_ip || "Any",
+        action: (rule.action || "ALLOW") as FirewallRule["action"],
+        enabled: rule.enabled ?? true,
+        note: rule.comment || rule.description,
+      }));
+    },
     enabled: !!serverId,
     staleTime: 20_000,
   });
@@ -313,7 +327,7 @@ export const useUpdateFirewallRule = (serverId: string) => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ ruleId, body }: { ruleId: string; body: Partial<IPTableRuleDTO> }) =>
-      iptablesApi.update(ruleId, body),
+      iptablesApi.update(serverId, ruleId, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["servers", "firewall", serverId] }),
   });
 };
@@ -321,13 +335,18 @@ export const useUpdateFirewallRule = (serverId: string) => {
 export const useDeleteFirewallRule = (serverId: string) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (ruleId: string) => iptablesApi.delete(ruleId),
+    mutationFn: (ruleId: string) => iptablesApi.delete(serverId, ruleId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["servers", "firewall", serverId] }),
   });
 };
 
 export const useApplyFirewall = (serverId: string) =>
-  useMutation({ mutationFn: () => iptablesApi.apply(serverId) });
+  useMutation({
+    mutationFn: () => iptablesApi.apply(serverId),
+    onSuccess: () => {
+      // caller may still refetch explicitly, but keep firewall views fresh by default
+    },
+  });
 
 export const useBackupFirewall = (serverId: string) =>
   useMutation({ mutationFn: () => iptablesApi.backup(serverId) });
@@ -366,10 +385,16 @@ export const useAddServer = () => {
     mutationFn: async (newServer: Partial<Server>): Promise<Server> => {
       const dto = await serversApi.create({
         name: newServer.name ?? "new-server",
+        hostname: newServer.hostname ?? newServer.name ?? "new-server",
         ip_address: newServer.ip_address ?? "",
         os: newServer.os ?? "linux",
-        os_version: (newServer as any).os_version,
+        os_version: newServer.os_version,
         description: newServer.description,
+        environment: newServer.environment,
+        connection_mode:
+          newServer.connection_mode === "ssh"
+            ? "direct"
+            : newServer.connection_mode ?? "agent",
         cpu_cores: newServer.cpu_cores,
         memory_gb: newServer.memory_gb,
         disk_gb: newServer.disk_gb,
@@ -379,15 +404,38 @@ export const useAddServer = () => {
         ssh_user: newServer.ssh_user,
         ssh_password: newServer.ssh_password,
         ssh_key_path: newServer.ssh_key_path,
-        tunnel_enabled: newServer.tunnel_enabled,
-        tunnel_host: (newServer as any).tunnel_host,
-        tunnel_port: (newServer as any).tunnel_port,
+        tags: newServer.tags,
       });
       return {
-        ...newServer,
         id: dto.id,
+        name: dto.name,
+        description: dto.description ?? "",
+        hostname: dto.hostname ?? dto.name,
         status: dto.status ?? "offline",
-      } as Server;
+        ip_address: dto.ip_address,
+        os: dto.os as Server["os"],
+        os_version: dto.os_version ?? "",
+        environment: dto.environment,
+        connection_mode:
+          dto.connection_mode === "direct"
+            ? "ssh"
+            : (dto.connection_mode as Server["connection_mode"]) ?? "agent",
+        onboarding_status: dto.onboarding_status,
+        cpu_cores: dto.cpu_cores ?? 0,
+        memory_gb: dto.memory_gb ?? 0,
+        disk_gb: dto.disk_gb ?? 0,
+        location: dto.location,
+        provider: dto.provider,
+        ssh_port: dto.ssh_port ?? 22,
+        ssh_user: dto.ssh_user ?? "root",
+        ssh_password: newServer.ssh_password,
+        ssh_key_path: dto.ssh_key_path,
+        tunnel_enabled: false,
+        tags: dto.tags ?? [],
+        agent_version: dto.agent_version,
+        created_at: dto.created_at,
+        updated_at: dto.updated_at,
+      };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["servers"] });
@@ -398,14 +446,7 @@ export const useAddServer = () => {
 export const useAgentToken = () => {
   return useMutation({
     mutationFn: async (serverId: string): Promise<{ token: string }> => {
-      const res = await fetch(`/api/v1/servers/${serverId}/agent-token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!res.ok) {
-        throw new Error("Failed to generate agent token");
-      }
-      return res.json();
+      return serversApi.agentToken(serverId).then((data) => ({ token: data.token }));
     },
   });
 };

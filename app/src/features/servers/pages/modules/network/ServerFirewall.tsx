@@ -11,6 +11,7 @@ import {
   ArrowUp,
 } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
+import { useNotification } from "@/core/NotificationContext";
 import { Button } from "@/shared/ui/Button";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/shared/ui/Table";
 import {
@@ -31,6 +32,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { FirewallRule, FirewallPolicy } from "@/types/firewall.types";
+import type { IPTableRuleDTO } from "@/shared/api/client";
 import { useFirewallRules, useDeleteFirewallRule, useUpdateFirewallRule, useApplyFirewall } from "../../../api/useServerHooks";
 
 const INITIAL_POLICY: FirewallPolicy = {
@@ -176,9 +178,10 @@ function SortableRuleRow({
 
 export default function ServerFirewall() {
   const { serverId } = useParams<{ serverId: string }>();
+  const { showNotification } = useNotification();
   
   // Real Hooks
-  const { data: rulesData, isLoading: loading } = useFirewallRules(serverId || "");
+  const { data: rulesData, isLoading: loading, refetch } = useFirewallRules(serverId || "");
   const { mutateAsync: deleteRule } = useDeleteFirewallRule(serverId || "");
   const { mutateAsync: updateRule } = useUpdateFirewallRule(serverId || "");
   const { mutateAsync: applyFirewall } = useApplyFirewall(serverId || "");
@@ -187,6 +190,8 @@ export default function ServerFirewall() {
   const [originalRules, setOriginalRules] = useState<FirewallRule[]>([]);
   const [policy, setPolicy] = useState<FirewallPolicy>(INITIAL_POLICY);
   const [hasChanges, setHasChanges] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -227,8 +232,17 @@ export default function ServerFirewall() {
     if (confirm("Are you sure you want to delete this rule?")) {
       try {
         await deleteRule(id);
+        showNotification({
+          type: "success",
+          message: "Firewall rule deleted",
+          description: "The rule was removed from the current rule set.",
+        });
       } catch (error) {
-        console.error("Failed to delete rule", error);
+        showNotification({
+          type: "error",
+          message: "Failed to delete rule",
+          description: error instanceof Error ? error.message : "Request failed.",
+        });
       }
     }
   };
@@ -237,10 +251,66 @@ export default function ServerFirewall() {
     const rule = rules.find((r) => r.id === id);
     if (rule) {
       try {
-        await updateRule({ ...rule, enabled: !rule.enabled });
+        const body: Partial<IPTableRuleDTO> = {
+          enabled: !rule.enabled,
+          chain: rule.direction === "OUTBOUND" ? "OUTPUT" : "INPUT",
+          action: rule.action,
+          protocol: rule.protocol,
+          dest_port: rule.port,
+          source_ip: rule.source,
+          position: rule.priority,
+          comment: rule.note,
+        };
+        await updateRule({ ruleId: rule.id, body });
+        showNotification({
+          type: "success",
+          message: "Rule updated",
+          description: `${rule.direction} ${rule.protocol} ${rule.port} is now ${!rule.enabled ? "enabled" : "disabled"}.`,
+        });
       } catch (error) {
-        console.error("Failed to toggle rule", error);
+        showNotification({
+          type: "error",
+          message: "Failed to toggle rule",
+          description: error instanceof Error ? error.message : "Request failed.",
+        });
       }
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+      showNotification({
+        type: "success",
+        message: "Firewall rules refreshed",
+        description: "Latest rules were loaded from the backend.",
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleApplyChanges = async () => {
+    setApplying(true);
+    try {
+      await applyFirewall();
+      setOriginalRules(JSON.parse(JSON.stringify(rules)));
+      setHasChanges(false);
+      showNotification({
+        type: "success",
+        message: "Firewall apply queued",
+        description: "The node is applying the latest iptables rules.",
+      });
+      await refetch();
+    } catch (error) {
+      showNotification({
+        type: "error",
+        message: "Failed to apply firewall",
+        description: error instanceof Error ? error.message : "Request failed.",
+      });
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -283,6 +353,10 @@ export default function ServerFirewall() {
           <Plus size={16} />
           <span>Add Rule</span>
         </Link>
+        <Button variant="outline" onClick={() => void handleRefresh()} disabled={refreshing}>
+          <RotateCcw size={16} className={`mr-2 ${refreshing ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
       </div>
 
       {/* Default Policy */}
@@ -416,7 +490,7 @@ export default function ServerFirewall() {
 
       {/* Pending Changes Bar */}
       {hasChanges && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-[#121212] dark:bg-white text-zinc-100 dark:text-zinc-900 px-6 py-4 rounded-2xl shadow-2xl flex items-center justify-between gap-6 z-50 animate-in slide-in-from-bottom-8 duration-500 w-[90%] md:w-[600px] border border-zinc-800 dark:border-zinc-200">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-zinc-950 dark:bg-zinc-100 text-zinc-100 dark:text-zinc-900 px-6 py-4 rounded-2xl shadow-2xl flex items-center justify-between gap-6 z-50 animate-in slide-in-from-bottom-8 duration-500 w-[90%] md:w-[640px] border border-zinc-800 dark:border-zinc-300">
           <div className="flex items-center gap-3">
             <AlertCircle
               className="text-amber-500"
@@ -435,7 +509,7 @@ export default function ServerFirewall() {
                 setRules(JSON.parse(JSON.stringify(originalRules)));
                 setHasChanges(false);
               }}
-              className="border-transparent text-zinc-400 hover:text-white dark:hover:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-100"
+              className="border-zinc-700 text-zinc-200 hover:text-white dark:border-zinc-300 dark:text-zinc-800 dark:hover:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200"
             >
               <RotateCcw size={14} className="mr-1.5" />
               Reset
@@ -443,18 +517,11 @@ export default function ServerFirewall() {
             <Button
               variant="primary"
               size="sm"
-              onClick={async () => {
-                try {
-                    await applyFirewall(rules);
-                    setOriginalRules(JSON.parse(JSON.stringify(rules)));
-                    setHasChanges(false);
-                } catch (error) {
-                    console.error("Failed to apply firewall", error);
-                }
-              }}
-              className="bg-amber-500 text-amber-950 hover:bg-amber-400"
+              onClick={() => void handleApplyChanges()}
+              disabled={applying}
+              className="bg-amber-500 text-amber-950 hover:bg-amber-400 disabled:opacity-60"
             >
-              <Save size={14} className="mr-1.5" />
+              {applying ? <RotateCcw size={14} className="mr-1.5 animate-spin" /> : <Save size={14} className="mr-1.5" />}
               Apply Changes
             </Button>
           </div>
