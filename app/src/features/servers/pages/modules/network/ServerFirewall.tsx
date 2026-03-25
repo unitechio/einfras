@@ -13,6 +13,7 @@ import {
 import { Link, useParams } from "react-router-dom";
 import { useNotification } from "@/core/NotificationContext";
 import { Button } from "@/shared/ui/Button";
+import { ConfirmActionDialog } from "@/shared/ui/ConfirmActionDialog";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/shared/ui/Table";
 import {
   DndContext,
@@ -192,6 +193,7 @@ export default function ServerFirewall() {
   const [hasChanges, setHasChanges] = useState(false);
   const [applying, setApplying] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [deleteCandidate, setDeleteCandidate] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -229,21 +231,19 @@ export default function ServerFirewall() {
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm("Are you sure you want to delete this rule?")) {
-      try {
-        await deleteRule(id);
-        showNotification({
-          type: "success",
-          message: "Firewall rule deleted",
-          description: "The rule was removed from the current rule set.",
-        });
-      } catch (error) {
-        showNotification({
-          type: "error",
-          message: "Failed to delete rule",
-          description: error instanceof Error ? error.message : "Request failed.",
-        });
-      }
+    try {
+      await deleteRule(id);
+      showNotification({
+        type: "success",
+        message: "Firewall rule deleted",
+        description: "The rule was removed from the current rule set.",
+      });
+    } catch (error) {
+      showNotification({
+        type: "error",
+        message: "Failed to delete rule",
+        description: error instanceof Error ? error.message : "Request failed.",
+      });
     }
   };
 
@@ -471,7 +471,7 @@ export default function ServerFirewall() {
                       key={rule.id}
                       rule={rule}
                       index={idx}
-                      onDelete={handleDelete}
+                      onDelete={(id) => setDeleteCandidate(id)}
                       onToggle={handleToggle}
                     />
                   ))}
@@ -527,6 +527,19 @@ export default function ServerFirewall() {
           </div>
         </div>
       )}
+      <ConfirmActionDialog
+        open={!!deleteCandidate}
+        title="Delete firewall rule?"
+        description="This removes the selected firewall rule from the current ruleset."
+        confirmLabel="Delete Rule"
+        onClose={() => setDeleteCandidate(null)}
+        onConfirm={() => {
+          if (!deleteCandidate) return;
+          void handleDelete(deleteCandidate).finally(() => setDeleteCandidate(null));
+        }}
+        pending={false}
+        tone="danger"
+      />
     </div>
   );
 }

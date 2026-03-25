@@ -90,6 +90,11 @@ type createServerRequest struct {
 	SSHUser        string                      `json:"ssh_user"`
 	SSHPassword    string                      `json:"ssh_password,omitempty"`
 	SSHKeyPath     string                      `json:"ssh_key_path,omitempty"`
+	TunnelEnabled  bool                        `json:"tunnel_enabled"`
+	TunnelHost     string                      `json:"tunnel_host,omitempty"`
+	TunnelPort     int                         `json:"tunnel_port,omitempty"`
+	TunnelUser     string                      `json:"tunnel_user,omitempty"`
+	TunnelKeyPath  string                      `json:"tunnel_key_path,omitempty"`
 	Tags           []string                    `json:"tags"`
 }
 
@@ -115,6 +120,11 @@ type serverResponse struct {
 	SSHPort          int                           `json:"ssh_port"`
 	SSHUser          string                        `json:"ssh_user"`
 	SSHKeyPath       string                        `json:"ssh_key_path,omitempty"`
+	TunnelEnabled    bool                          `json:"tunnel_enabled"`
+	TunnelHost       string                        `json:"tunnel_host,omitempty"`
+	TunnelPort       int                           `json:"tunnel_port,omitempty"`
+	TunnelUser       string                        `json:"tunnel_user,omitempty"`
+	TunnelKeyPath    string                        `json:"tunnel_key_path,omitempty"`
 	Tags             []string                      `json:"tags"`
 	LastCheckAt      *time.Time                    `json:"last_check_at,omitempty"`
 	AgentVersion     string                        `json:"agent_version,omitempty"`
@@ -143,6 +153,11 @@ func toServerResponse(server *domain.Server) serverResponse {
 		SSHPort:          server.SSHPort,
 		SSHUser:          server.SSHUser,
 		SSHKeyPath:       server.SSHKeyPath,
+		TunnelEnabled:    server.TunnelEnabled,
+		TunnelHost:       server.TunnelHost,
+		TunnelPort:       server.TunnelPort,
+		TunnelUser:       server.TunnelUser,
+		TunnelKeyPath:    server.TunnelKeyPath,
 		Tags:             append([]string(nil), server.Tags...),
 		LastCheckAt:      server.LastCheckAt,
 		AgentVersion:     server.AgentVersion,

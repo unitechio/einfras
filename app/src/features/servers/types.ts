@@ -22,6 +22,8 @@ export interface Server {
   tunnel_enabled: boolean;
   tunnel_host?: string;
   tunnel_port?: number;
+  tunnel_user?: string;
+  tunnel_key_path?: string;
   tags?: string[];
   agent_version?: string;
   metrics?: {

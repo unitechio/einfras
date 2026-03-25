@@ -1,3 +1,9 @@
+import {
+  clearSession,
+  getStoredSession,
+} from "@/features/authentication/auth-session";
+import { refreshSession } from "@/features/authentication/api";
+
 const BASE = "/api/v1";
 
 export class ApiError extends Error {
@@ -70,6 +76,49 @@ export interface AgentStatusDTO {
   uptime_seconds?: number;
 }
 
+export interface EnvironmentInventoryDTO {
+  id: string;
+  server_id: string;
+  server_name: string;
+  server_ip: string;
+  platform: "docker" | "kubernetes";
+  status: "up" | "down" | "degraded";
+  os?: string;
+  arch?: string;
+  endpoint?: string;
+  self_host: boolean;
+  last_seen?: string;
+  cpu_cores?: number;
+  memory_gb?: number;
+  disk_gb?: number;
+  cpu_percent?: number;
+  mem_percent?: number;
+  disk_percent?: number;
+  docker?: {
+    server_version?: string;
+    running?: number;
+    total?: number;
+    images?: number;
+    volumes?: number;
+    stacks?: number;
+    current_context?: string;
+    storage_driver?: string;
+    kernel_version?: string;
+    operating_system?: string;
+    docker_root_dir?: string;
+    ncpu?: number;
+    mem_total?: number;
+  };
+  kubernetes?: {
+    server_version?: string;
+    context?: string;
+    nodes?: number;
+    ready_nodes?: number;
+    namespaces?: number;
+    pods?: number;
+  };
+}
+
 function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
   return !!value && typeof value === "object" && "error" in value;
 }
@@ -79,19 +128,41 @@ function isSuccessEnvelope<TItem = unknown, TItems = unknown>(value: unknown): v
 }
 
 async function request<T>(method: string, path: string, body?: unknown, init?: RequestInit): Promise<T> {
+  return requestWithRetry<T>(method, path, body, init, true);
+}
+
+async function requestWithRetry<T>(
+  method: string,
+  path: string,
+  body: unknown,
+  init: RequestInit | undefined,
+  allowRefresh: boolean,
+): Promise<T> {
   const url = `${BASE}${path}`;
+  const session = getStoredSession();
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
+    ...(session?.principal?.organization_id
+      ? { "X-Organization-ID": session.principal.organization_id }
+      : {}),
+    ...(init?.headers ?? {}),
+  };
   const res = await fetch(url, {
     method,
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "X-User-Role": "admin",
-      "X-User-ID": "frontend-user",
-      ...(init?.headers ?? {}),
-    },
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
     cache: init?.cache,
   });
+
+  if (res.status === 401 && allowRefresh && session?.refreshToken) {
+    const refreshed = await refreshSession();
+    if (refreshed) {
+      return requestWithRetry<T>(method, path, body, init, false);
+    }
+    clearSession();
+  }
 
   const text = await res.text();
   const parsed = text ? safeParseJSON(text) : undefined;
@@ -206,6 +277,8 @@ export interface ServerDTO {
   tunnel_enabled?: boolean;
   tunnel_host?: string;
   tunnel_port?: number;
+  tunnel_user?: string;
+  tunnel_key_path?: string;
 }
 
 export interface ServerListResponse {
@@ -237,6 +310,21 @@ export interface CreateServerRequest {
   tunnel_enabled?: boolean;
   tunnel_host?: string;
   tunnel_port?: number;
+  tunnel_user?: string;
+  tunnel_key_path?: string;
+}
+
+export interface ServiceInstallPlanDTO {
+  id: string;
+  server_id: string;
+  mode: "private" | "relay";
+  package_name?: string;
+  artifact_name?: string;
+  relay_host?: string;
+  status?: string;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface CommandEnvelope {
@@ -519,6 +607,15 @@ export const commandsApi = {
 
 export const servicesApi = {
   list: async (serverId: string) => unwrapItems<ServiceDTO>(await api.get<Envelope<never, ServiceDTO[]>>(`/servers/${serverId}/services`)).items.map(normalizeService),
+  listInstallPlans: async (serverId: string) =>
+    unwrapItems<ServiceInstallPlanDTO>(await api.get<Envelope<never, ServiceInstallPlanDTO[]>>(`/servers/${serverId}/service-install-plans`)).items,
+  createInstallPlan: async (
+    serverId: string,
+    body: { mode: "private" | "relay"; package_name?: string; artifact_name?: string; relay_host?: string; notes?: string },
+  ) =>
+    unwrapItem<ServiceInstallPlanDTO>(
+      await api.post<Envelope<ServiceInstallPlanDTO>>(`/servers/${serverId}/service-install-plans`, body),
+    ),
   get: async (serverId: string, serviceName: string) => normalizeService(unwrapItem<ServiceDTO>(await api.get<Envelope<ServiceDTO>>(`/servers/${serverId}/services/${serviceName}`))),
   action: async (serverId: string, serviceName: string, action: "start" | "stop" | "restart" | "reload" | "enable" | "disable") =>
     unwrapAction(await api.post<Envelope>(`/servers/${serverId}/services/${serviceName}/actions`, { action })),
@@ -701,6 +798,13 @@ export const disksApi = {
     unwrapAction(await api.post<Envelope>(`/servers/${serverId}/disks/refresh`)),
 };
 
+export const environmentsApi = {
+  discovered: async () =>
+    unwrapItems<EnvironmentInventoryDTO>(
+      await api.get<Envelope<never, EnvironmentInventoryDTO[]>>(`/environments/discovered`),
+    ).items,
+};
+
 async function resolveCommandAction<T = unknown>(
   serverId: string,
   actionPromise: Promise<{ command?: unknown; result?: T; meta: Record<string, unknown> }>,
@@ -712,6 +816,22 @@ async function resolveCommandAction<T = unknown>(
     return action;
   }
   const completed = await commandsApi.waitForResult(serverId, command.id, options);
+  const commandStatus = String(completed.status ?? "").trim().toUpperCase();
+  const typedResult = completed.result as { status?: string; summary?: string; preview?: string } | undefined;
+  const typedResultStatus = String(typedResult?.status ?? "").trim().toLowerCase();
+  if (["FAILED", "CANCELLED", "CANCELED", "TIMEOUT", "TIMED_OUT", "ERROR"].includes(commandStatus) || typedResultStatus === "failed") {
+    const message =
+      typedResult?.summary?.trim()
+        ? typedResult.summary.trim()
+        : typeof typedResult?.preview === "string" && typedResult.preview.trim()
+          ? typedResult.preview.trim()
+          : typeof completed.raw_output === "string" && completed.raw_output.trim()
+        ? completed.raw_output.trim()
+        : typeof completed.output_preview === "string" && completed.output_preview.trim()
+          ? completed.output_preview.trim()
+          : `Command ${completed.command} failed with status ${completed.status}`;
+    throw new ApiError(500, message, message);
+  }
   return {
     ...action,
     command: completed,

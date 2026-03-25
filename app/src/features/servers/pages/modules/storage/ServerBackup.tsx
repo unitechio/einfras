@@ -25,6 +25,7 @@ import {
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/shared/ui/Button";
+import { ConfirmActionDialog } from "@/shared/ui/ConfirmActionDialog";
 import { Input } from "@/shared/ui/Input";
 import { useNotification } from "@/core/NotificationContext";
 
@@ -47,6 +48,8 @@ export default function ServerBackup() {
   const [search, setSearch] = useState("");
   const [selectedBackupId, setSelectedBackupId] = useState<string | null>(null);
   const [customPath, setCustomPath] = useState("/etc");
+  const [restoreCandidate, setRestoreCandidate] = useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<string | null>(null);
 
   const handleRunBackup = async () => {
     try {
@@ -66,40 +69,36 @@ export default function ServerBackup() {
   };
 
   const handleRestore = async (backupId: string) => {
-    if (confirm("Are you sure you want to restore from this backup? This will overwrite existing data.")) {
-        try {
-            await restoreBackup(backupId);
-            showNotification({
-              type: "success",
-              message: "Restore queued",
-              description: "The selected backup is being restored.",
-            });
-        } catch (error) {
-            showNotification({
-              type: "error",
-              message: "Failed to restore backup",
-              description: error instanceof Error ? error.message : "Request failed.",
-            });
-        }
+    try {
+      await restoreBackup(backupId);
+      showNotification({
+        type: "success",
+        message: "Restore queued",
+        description: "The selected backup is being restored.",
+      });
+    } catch (error) {
+      showNotification({
+        type: "error",
+        message: "Failed to restore backup",
+        description: error instanceof Error ? error.message : "Request failed.",
+      });
     }
   };
 
   const handleDelete = async (backupId: string) => {
-    if (confirm("Are you sure you want to delete this backup?")) {
-        try {
-            await deleteBackup(backupId);
-            showNotification({
-              type: "success",
-              message: "Backup deleted",
-              description: "The selected backup has been removed.",
-            });
-        } catch (error) {
-            showNotification({
-              type: "error",
-              message: "Failed to delete backup",
-              description: error instanceof Error ? error.message : "Request failed.",
-            });
-        }
+    try {
+      await deleteBackup(backupId);
+      showNotification({
+        type: "success",
+        message: "Backup deleted",
+        description: "The selected backup has been removed.",
+      });
+    } catch (error) {
+      showNotification({
+        type: "error",
+        message: "Failed to delete backup",
+        description: error instanceof Error ? error.message : "Request failed.",
+      });
     }
   }
   const filteredBackups = backups.filter((backup) => {
@@ -686,7 +685,7 @@ export default function ServerBackup() {
                             size="icon" 
                             className="h-6 w-6 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:text-blue-400 dark:hover:bg-blue-900/20" 
                             title="Restore"
-                            onClick={(e) => { e.stopPropagation(); handleRestore(backup.id); }}
+                            onClick={(e) => { e.stopPropagation(); setRestoreCandidate(backup.id); }}
                         >
                           <Upload size={14} />
                         </Button>
@@ -695,7 +694,7 @@ export default function ServerBackup() {
                             size="icon" 
                             className="h-6 w-6 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20" 
                             title="Delete"
-                            onClick={(e) => { e.stopPropagation(); handleDelete(backup.id); }}
+                            onClick={(e) => { e.stopPropagation(); setDeleteCandidate(backup.id); }}
                         >
                           <Trash2 size={14} />
                         </Button>
@@ -726,11 +725,11 @@ export default function ServerBackup() {
                 <DetailRow label="Size" value={formatBytes(selectedBackup.size ?? 0)} />
                 <DetailRow label="Created" value={selectedBackup.created_at ? new Date(selectedBackup.created_at).toLocaleString() : "n/a"} />
                 <div className="flex gap-2 pt-2">
-                  <Button variant="outline" onClick={() => void handleRestore(selectedBackup.id)}>
+                  <Button variant="outline" onClick={() => setRestoreCandidate(selectedBackup.id)}>
                     <Download size={14} className="mr-2" />
                     Restore
                   </Button>
-                  <Button variant="danger" onClick={() => void handleDelete(selectedBackup.id)}>
+                  <Button variant="danger" onClick={() => setDeleteCandidate(selectedBackup.id)}>
                     <Trash2 size={14} className="mr-2" />
                     Delete
                   </Button>
@@ -742,6 +741,32 @@ export default function ServerBackup() {
           </div>
         </div>
       </div>
+      <ConfirmActionDialog
+        open={!!restoreCandidate}
+        title="Restore backup?"
+        description="This will overwrite current data on the server with the selected restore point."
+        confirmLabel="Restore Backup"
+        onClose={() => setRestoreCandidate(null)}
+        onConfirm={() => {
+          if (!restoreCandidate) return;
+          void handleRestore(restoreCandidate).finally(() => setRestoreCandidate(null));
+        }}
+        pending={false}
+        tone="warning"
+      />
+      <ConfirmActionDialog
+        open={!!deleteCandidate}
+        title="Delete backup?"
+        description="This permanently removes the selected backup artifact."
+        confirmLabel="Delete Backup"
+        onClose={() => setDeleteCandidate(null)}
+        onConfirm={() => {
+          if (!deleteCandidate) return;
+          void handleDelete(deleteCandidate).finally(() => setDeleteCandidate(null));
+        }}
+        pending={false}
+        tone="danger"
+      />
     </div>
   );
 }

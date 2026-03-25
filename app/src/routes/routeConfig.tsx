@@ -64,6 +64,21 @@ const EdgeComputeSettingsPage = lazy(() =>
     default: m.EdgeComputeSettingsPage,
   })),
 );
+const FeatureFlagsSettingsPage = lazy(() =>
+  import("@/features/settings").then((m) => ({
+    default: m.FeatureFlagsSettingsPage,
+  })),
+);
+const LicenseSettingsPage = lazy(() =>
+  import("@/features/settings").then((m) => ({
+    default: m.LicenseSettingsPage,
+  })),
+);
+const NotificationRoutingRulesPage = lazy(() =>
+  import("@/features/settings").then((m) => ({
+    default: m.NotificationRoutingRulesPage,
+  })),
+);
 const ApplicationsPage = lazy(() =>
   import("@/features/applications").then((m) => ({
     default: m.ApplicationsPage,
@@ -145,23 +160,62 @@ const ServersPage = lazy(() =>
 const ContainersPage = lazy(() =>
   import("@/features/docker").then((m) => ({ default: m.ContainersPage })),
 );
+const DeployContainerPage = lazy(() =>
+  import("@/features/docker").then((m) => ({ default: m.DeployContainerPage })),
+);
+const ContainerDetailPage = lazy(() =>
+  import("@/features/docker").then((m) => ({ default: m.ContainerDetailPage })),
+);
+const EditContainerPage = lazy(() =>
+  import("@/features/docker/pages/EditContainerPage").then((m) => ({ default: m.default })),
+);
 const ImagesPage = lazy(() =>
   import("@/features/docker").then((m) => ({ default: m.ImagesPage })),
 );
 const NetworksPage = lazy(() =>
   import("@/features/docker").then((m) => ({ default: m.NetworksPage })),
 );
+const NetworkDetailPage = lazy(() =>
+  import("@/features/docker").then((m) => ({ default: m.NetworkDetailPage })),
+);
 const VolumesPage = lazy(() =>
   import("@/features/docker").then((m) => ({ default: m.VolumesPage })),
 );
+const VolumeDetailPage = lazy(() =>
+  import("@/features/docker").then((m) => ({ default: m.VolumeDetailPage })),
+);
+const ServiceDetailPage = lazy(() =>
+  import("@/features/docker").then((m) => ({ default: m.ServiceDetailPage })),
+);
 const StacksPage = lazy(() =>
   import("@/features/docker").then((m) => ({ default: m.StacksPage })),
+);
+const StackEditorPage = lazy(() =>
+  import("@/features/docker/pages/StackEditorPage").then((m) => ({ default: m.default })),
+);
+const LogsPage = lazy(() =>
+  import("@/features/docker").then((m) => ({ default: m.LogsPage })),
+);
+const TopologyPage = lazy(() =>
+  import("@/features/docker").then((m) => ({ default: m.TopologyPage })),
+);
+const AutoHealPage = lazy(() =>
+  import("@/features/docker").then((m) => ({ default: m.AutoHealPage })),
 );
 const TemplatesPage = lazy(() =>
   import("@/features/docker").then((m) => ({ default: m.TemplatesPage })),
 );
 const CustomTemplatesPage = lazy(() =>
   import("@/features/docker").then((m) => ({ default: m.CustomTemplatesPage })),
+);
+const CustomTemplateEditorPage = lazy(() =>
+  import("@/features/docker").then((m) => ({ default: m.CustomTemplateEditorPage })),
+);
+const CustomTemplateSettingsPage = lazy(() =>
+  import("@/features/docker").then((m) => ({ default: m.CustomTemplateSettingsPage })),
+);
+const BuildArtifactsPage = lazy(() =>
+  import("@/features/docker").then((m) => ({ default: m.BuildArtifactsPage })),
 );
 const KubernetesPage = lazy(() =>
   import("@/features/kubernetes").then((m) => ({ default: m.KubernetesPage })),
@@ -174,6 +228,99 @@ const DeploymentsPage = lazy(() =>
 );
 const ServicesPage = lazy(() =>
   import("@/features/kubernetes").then((m) => ({ default: m.ServicesPage })),
+);
+const IngressesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.IngressesPage })),
+);
+const ConfigMapsPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.ConfigMapsPage })),
+);
+const SecretsPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.SecretsPage })),
+);
+const NodesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.NodesPage })),
+);
+const PersistentVolumesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.PersistentVolumesPage })),
+);
+const JobsPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.JobsPage })),
+);
+const HelmReleasesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.HelmReleasesPage })),
+);
+const NamespacesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.NamespacesPage })),
+);
+const StatefulSetsPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.StatefulSetsPage })),
+);
+const DaemonSetsPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.DaemonSetsPage })),
+);
+const ReplicaSetsPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.ReplicaSetsPage })),
+);
+const NetworkPoliciesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.NetworkPoliciesPage })),
+);
+const StorageClassesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.StorageClassesPage })),
+);
+const ServiceAccountsPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.ServiceAccountsPage })),
+);
+const RolesK8sPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.RolesPage })),
+);
+const RoleBindingsPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.RoleBindingsPage })),
+);
+const ClusterRolesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.ClusterRolesPage })),
+);
+const ClusterRoleBindingsPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.ClusterRoleBindingsPage })),
+);
+const HPAPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.HPAPage })),
+);
+const VPAPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.VPAPage })),
+);
+const CRDsPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.CRDsPage })),
+);
+const EndpointsPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.EndpointsPage })),
+);
+const EndpointSlicesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.EndpointSlicesPage })),
+);
+const IngressClassesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.IngressClassesPage })),
+);
+const GatewaysPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.GatewaysPage })),
+);
+const GatewayClassesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.GatewayClassesPage })),
+);
+const HTTPRoutesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.HTTPRoutesPage })),
+);
+const KubernetesTopologyPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.TopologyPage })),
+);
+const K8sSearchPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.SearchPage })),
+);
+const CustomResourceInstancesPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.CustomResourceInstancesPage })),
+);
+const K8sCreateResourcePage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.K8sCreateResourcePage })),
 );
 const RepositoriesPage = lazy(() =>
   import("@/features/repositories").then((m) => ({
@@ -276,21 +423,67 @@ export const routes: RouteObject[] = [
   { path: "/environments", element: React.createElement(EnvironmentsPage) }, // Old route, could redirect
   { path: "/pods", element: React.createElement(PodsPage) },
   { path: "/deployments", element: React.createElement(DeploymentsPage) },
+  { path: "/statefulsets", element: React.createElement(StatefulSetsPage) },
+  { path: "/daemonsets", element: React.createElement(DaemonSetsPage) },
+  { path: "/replicasets", element: React.createElement(ReplicaSetsPage) },
   { path: "/services", element: React.createElement(ServicesPage) },
+  { path: "/endpoints", element: React.createElement(EndpointsPage) },
+  { path: "/endpointslices", element: React.createElement(EndpointSlicesPage) },
+  { path: "/ingresses", element: React.createElement(IngressesPage) },
+  { path: "/ingressclasses", element: React.createElement(IngressClassesPage) },
+  { path: "/networkpolicies", element: React.createElement(NetworkPoliciesPage) },
+  { path: "/gateways", element: React.createElement(GatewaysPage) },
+  { path: "/gatewayclasses", element: React.createElement(GatewayClassesPage) },
+  { path: "/httproutes", element: React.createElement(HTTPRoutesPage) },
+  { path: "/configmaps", element: React.createElement(ConfigMapsPage) },
+  { path: "/secrets", element: React.createElement(SecretsPage) },
+  { path: "/serviceaccounts", element: React.createElement(ServiceAccountsPage) },
+  { path: "/roles-k8s", element: React.createElement(RolesK8sPage) },
+  { path: "/rolebindings", element: React.createElement(RoleBindingsPage) },
+  { path: "/clusterroles", element: React.createElement(ClusterRolesPage) },
+  { path: "/clusterrolebindings", element: React.createElement(ClusterRoleBindingsPage) },
+  { path: "/nodes", element: React.createElement(NodesPage) },
+  { path: "/persistent-volumes", element: React.createElement(PersistentVolumesPage) },
+  { path: "/storageclasses", element: React.createElement(StorageClassesPage) },
+  { path: "/jobs", element: React.createElement(JobsPage) },
+  { path: "/hpa", element: React.createElement(HPAPage) },
+  { path: "/vpa", element: React.createElement(VPAPage) },
+  { path: "/crds", element: React.createElement(CRDsPage) },
+  { path: "/kubernetes-search", element: React.createElement(K8sSearchPage) },
+  { path: "/custom-resources", element: React.createElement(CustomResourceInstancesPage) },
+  { path: "/resources/:resourceType/create", element: React.createElement(K8sCreateResourcePage) },
+  { path: "/kubernetes-topology", element: React.createElement(KubernetesTopologyPage) },
+  { path: "/helm", element: React.createElement(HelmReleasesPage) },
+  { path: "/namespaces", element: React.createElement(NamespacesPage) },
   { path: "/dashboard", element: React.createElement(DashboardPage) },
   { path: "/templates", element: React.createElement(TemplatesPage) },
   {
     path: "/templates/custom",
     element: React.createElement(CustomTemplatesPage),
   },
+  { path: "/templates/custom/new/edit", element: React.createElement(CustomTemplateEditorPage) },
+  { path: "/templates/custom/:templateId/edit", element: React.createElement(CustomTemplateEditorPage) },
+  { path: "/templates/custom/:templateId/settings", element: React.createElement(CustomTemplateSettingsPage) },
   { path: "/stacks", element: React.createElement(StacksPage) },
+  { path: "/stacks/new", element: React.createElement(StackEditorPage) },
+  { path: "/stacks/:stackName/edit", element: React.createElement(StackEditorPage) },
+  { path: "/stacks/:stackName/services/:serviceName", element: React.createElement(ServiceDetailPage) },
   { path: "/containers", element: React.createElement(ContainersPage) },
+  { path: "/containers/deploy", element: React.createElement(DeployContainerPage) },
+  { path: "/containers/:containerId", element: React.createElement(ContainerDetailPage) },
+  { path: "/containers/:containerId/edit", element: React.createElement(EditContainerPage) },
   { path: "/images", element: React.createElement(ImagesPage) },
+  { path: "/images/build", element: React.createElement(BuildArtifactsPage) },
+  { path: "/logs", element: React.createElement(LogsPage) },
+  { path: "/topology", element: React.createElement(TopologyPage) },
+  { path: "/auto-heal", element: React.createElement(AutoHealPage) },
   { path: "/volumes", element: React.createElement(VolumesPage) },
+  { path: "/volumes/:volumeName", element: React.createElement(VolumeDetailPage) },
   { path: "/users", element: React.createElement(UsersPage) },
   { path: "/roles", element: React.createElement(RolesPage) },
   { path: "/teams", element: React.createElement(TeamsPage) },
   { path: "/networks", element: React.createElement(NetworksPage) },
+  { path: "/networks/:networkId", element: React.createElement(NetworkDetailPage) },
   { path: "/registries", element: React.createElement(RegistriesPage) },
   { path: "/events", element: React.createElement(EventsPage) },
   {
@@ -312,6 +505,18 @@ export const routes: RouteObject[] = [
     path: "/settings/edge-compute",
     element: React.createElement(EdgeComputeSettingsPage),
   },
+  {
+    path: "/settings/feature-flags",
+    element: React.createElement(FeatureFlagsSettingsPage),
+  },
+  {
+    path: "/settings/license",
+    element: React.createElement(LicenseSettingsPage),
+  },
+  {
+    path: "/settings/notification-routing",
+    element: React.createElement(NotificationRoutingRulesPage),
+  },
   { path: "/applications", element: React.createElement(ApplicationsPage) },
   { path: "/tags", element: React.createElement(TagsPage) },
   { path: "/notifications", element: React.createElement(NotificationsPage) },
@@ -324,3 +529,5 @@ export const routes: RouteObject[] = [
     element: React.createElement(Navigate, { to: "/", replace: true }),
   },
 ];
+
+

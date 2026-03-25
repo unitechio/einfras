@@ -1,34 +1,89 @@
 import { useState, useEffect } from "react";
-import { Search, Share2, Server, Plus, Trash2, Network } from "lucide-react";
-import { useNetworks } from "../api/useDockerHooks";
-import { useServers } from "../../servers/api/useServers";
+import { Link } from "react-router-dom";
+import { Search, Share2, Server, Plus, Trash2, Network, Pencil, AlertTriangle } from "lucide-react";
+import { useDeleteNetwork, useNetworks, useSaveNetwork } from "../api/useDockerHooks";
+import { useEnvironmentInventory } from "../../kubernetes/api/useEnvironmentInventory";
+import { useEnvironment } from "@/core/EnvironmentContext";
 import { useNotification } from "@/core/NotificationContext";
 import { Button } from "@/shared/ui/Button";
+import { ConfirmActionDialog } from "@/shared/ui/ConfirmActionDialog";
 import { Input } from "@/shared/ui/Input";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/shared/ui/Table";
 import { Badge } from "@/shared/ui/Badge";
 
+type NetworkDraft = {
+    originalId?: string;
+    name: string;
+    driver: string;
+    internal: boolean;
+};
+
 export default function NetworksPage() {
-    const { data: serverData, isLoading: isLoadingServers } = useServers({ page: 1, page_size: 100 });
-    const servers = serverData?.data || [];
-    
-    // Auto-select first server if available
+    const { data: inventory = [], isLoading: isLoadingServers } = useEnvironmentInventory();
+    const { selectedEnvironment } = useEnvironment();
+    const servers = inventory.filter((env) => env.type === "docker");
+
     const [selectedServerId, setSelectedServerId] = useState<string>("");
     const { showNotification } = useNotification();
     useEffect(() => {
+        if (selectedEnvironment?.type === "docker" && selectedEnvironment.id !== selectedServerId) {
+            setSelectedServerId(selectedEnvironment.id);
+            return;
+        }
         if (!selectedServerId && servers.length > 0) {
             setSelectedServerId(servers[0].id);
         }
-    }, [servers, selectedServerId]);
+    }, [servers, selectedServerId, selectedEnvironment]);
 
     const [searchQuery, setSearchQuery] = useState("");
+    const [isCreateOpen, setIsCreateOpen] = useState(false);
+    const [draftName, setDraftName] = useState("");
+    const [draftDriver, setDraftDriver] = useState("bridge");
+    const [draftInternal, setDraftInternal] = useState(false);
+    const [editingNetwork, setEditingNetwork] = useState<NetworkDraft | null>(null);
+    const [deleteCandidate, setDeleteCandidate] = useState<{ id: string; name: string } | null>(null);
 
     const { data: networks, isLoading: isLoadingNetworks } = useNetworks(selectedServerId);
+    const saveNetwork = useSaveNetwork(selectedServerId);
+    const deleteNetwork = useDeleteNetwork(selectedServerId);
 
     const filteredNetworks = (networks || []).filter(n => 
         n.Name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         n.Driver.toLowerCase().includes(searchQuery.toLowerCase())
     );
+
+    const resetCreateDraft = () => {
+        setDraftName("");
+        setDraftDriver("bridge");
+        setDraftInternal(false);
+    };
+
+    const submitNetwork = (payload: NetworkDraft, mode: "create" | "edit") => {
+        const normalizedName = payload.name.trim();
+        if (!normalizedName) {
+            return;
+        }
+        const duplicate = (networks || []).some((item) => item.Name.toLowerCase() === normalizedName.toLowerCase() && item.Id !== payload.originalId);
+        if (duplicate) {
+            showNotification({ type: "error", message: "Network already exists", description: normalizedName });
+            return;
+        }
+        saveNetwork.mutate(
+            { originalId: payload.originalId, name: normalizedName, driver: payload.driver.trim(), internal: payload.internal },
+            {
+                onSuccess: () => {
+                    showNotification({ type: "success", message: mode === "create" ? "Network created" : "Network updated", description: normalizedName });
+                    if (mode === "create") {
+                        setIsCreateOpen(false);
+                        resetCreateDraft();
+                        return;
+                    }
+                    setEditingNetwork(null);
+                },
+                onError: (error: any) => showNotification({ type: "error", message: `${mode === "create" ? "Create" : "Update"} network failed`, description: humanizeNetworkError(error?.message || "Unable to save network.") }),
+            },
+        );
+    };
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500 pb-20">
@@ -52,16 +107,16 @@ export default function NetworksPage() {
                             disabled={isLoadingServers}
                             className="pl-9 pr-8 h-9 text-[13px] font-medium bg-white dark:bg-[#121212] border border-zinc-200 dark:border-zinc-800 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 min-w-[200px] text-zinc-900 dark:text-zinc-100 appearance-none shadow-sm cursor-pointer"
                         >
-                            <option value="" disabled>Select Server...</option>
+                            <option value="" disabled>Select Environment...</option>
                             {servers.map(s => (
-                                <option key={s.id} value={s.id}>{s.name} ({s.ip_address})</option>
+                                <option key={s.id} value={s.id}>{s.name} ({s.url})</option>
                             ))}
                         </select>
                     </div>
                     
                     <Button 
                         variant="primary" size="md"
-                        onClick={() => showNotification({ type: "info", message: "Create Network", description: "Modal to create new network would appear here." })}
+                        onClick={() => setIsCreateOpen(true)}
                     >
                         <Plus className="mr-2 h-4 w-4" />
                         Create Network
@@ -81,6 +136,76 @@ export default function NetworksPage() {
                     />
                 </div>
             </div>
+
+            {isCreateOpen ? (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                    <div className="w-full max-w-xl rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-[#121212]">
+                        <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Create Network</h3>
+                        <p className="mt-1 text-sm text-zinc-500">Create a named Docker network with driver and isolation settings.</p>
+                        <div className="mt-4 space-y-4">
+                            <Input value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder="Network name" />
+                            <select value={draftDriver} onChange={(event) => setDraftDriver(event.target.value)} className="h-10 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-[#121212]">
+                                <option value="bridge">bridge</option>
+                                <option value="overlay">overlay</option>
+                                <option value="host">host</option>
+                                <option value="macvlan">macvlan</option>
+                            </select>
+                            <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                                <input type="checkbox" checked={draftInternal} onChange={(event) => setDraftInternal(event.target.checked)} />
+                                Internal network
+                            </label>
+                            {draftDriver === "overlay" ? (
+                                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+                                    Overlay networks require this Docker environment to be a Swarm manager. Use <span className="font-mono">docker swarm init</span> or choose another driver.
+                                </div>
+                            ) : null}
+                        </div>
+                        <div className="mt-5 flex justify-end gap-2">
+                            <Button variant="outline" onClick={() => { setIsCreateOpen(false); resetCreateDraft(); }}>Cancel</Button>
+                            <Button
+                                variant="primary"
+                                onClick={() => submitNetwork({ name: draftName, driver: draftDriver, internal: draftInternal }, "create")}
+                                disabled={!draftName.trim()}
+                            >
+                                Create Network
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
+            {editingNetwork ? (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                    <div className="w-full max-w-xl rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-[#121212]">
+                        <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Edit Network</h3>
+                        <p className="mt-1 text-sm text-zinc-500">Update the Docker network name, driver, and isolation mode.</p>
+                        <div className="mt-4 space-y-4">
+                            <Input value={editingNetwork.name} onChange={(event) => setEditingNetwork((current) => current ? { ...current, name: event.target.value } : current)} placeholder="Network name" />
+                            <select value={editingNetwork.driver} onChange={(event) => setEditingNetwork((current) => current ? { ...current, driver: event.target.value } : current)} className="h-10 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-[#121212]">
+                                <option value="bridge">bridge</option>
+                                <option value="overlay">overlay</option>
+                                <option value="host">host</option>
+                                <option value="macvlan">macvlan</option>
+                            </select>
+                            <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                                <input type="checkbox" checked={editingNetwork.internal} onChange={(event) => setEditingNetwork((current) => current ? { ...current, internal: event.target.checked } : current)} />
+                                Internal network
+                            </label>
+                            {editingNetwork.driver === "overlay" ? (
+                                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+                                    Overlay updates only work on Swarm managers. If this host is standalone Docker, keep the driver as <span className="font-mono">bridge</span> or <span className="font-mono">host</span>.
+                                </div>
+                            ) : null}
+                        </div>
+                        <div className="mt-5 flex justify-end gap-2">
+                            <Button variant="outline" onClick={() => setEditingNetwork(null)}>Cancel</Button>
+                            <Button variant="primary" onClick={() => submitNetwork(editingNetwork, "edit")} disabled={!editingNetwork.name.trim()}>
+                                Save Changes
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
 
             <div className="bg-white dark:bg-[#121212] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
@@ -120,9 +245,9 @@ export default function NetworksPage() {
                                 filteredNetworks.map((network) => (
                                     <TableRow key={network.Id} className="group">
                                         <TableCell>
-                                            <span className="font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors cursor-pointer block truncate" title={network.Name}>
+                                            <Link to={`/networks/${network.Id}`} className="font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors cursor-pointer block truncate" title={network.Name}>
                                                 {network.Name}
-                                            </span>
+                                            </Link>
                                         </TableCell>
                                         <TableCell>
                                             <Badge variant={network.Driver === 'bridge' ? 'default' : 'outline'} className="text-xs uppercase">
@@ -145,12 +270,15 @@ export default function NetworksPage() {
                                         <TableCell className="text-right">
                                             <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <Button 
+                                                    variant="ghost" size="icon"
+                                                    onClick={() => setEditingNetwork({ originalId: network.Id, name: network.Name, driver: network.Driver, internal: network.Internal })}
+                                                    className="text-zinc-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20" title="Edit Network"
+                                                >
+                                                    <Pencil size={14} />
+                                                </Button>
+                                                <Button 
                                                     variant="ghost" size="icon" 
-                                                    onClick={() => {
-                                                        if(confirm(`Are you sure you want to remove network ${network.Name}?`)) {
-                                                          showNotification({ type: "error", message: "Network Removed", description: `Removed network ${network.Name}` });
-                                                        }
-                                                    }}
+                                                    onClick={() => setDeleteCandidate({ id: network.Id, name: network.Name })}
                                                     className="text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" title="Remove Network"
                                                 >
                                                     <Trash2 size={14} />
@@ -164,6 +292,37 @@ export default function NetworksPage() {
                     </Table>
                 </div>
             </div>
+            <ConfirmActionDialog
+                open={!!deleteCandidate}
+                title="Remove network?"
+                description={`This removes ${deleteCandidate?.name || "the selected network"} from the Docker host. Connected containers or stacks may lose connectivity immediately.`}
+                confirmLabel={deleteNetwork.isPending ? "Removing..." : "Remove Network"}
+                onClose={() => setDeleteCandidate(null)}
+                onConfirm={() => {
+                    if (!deleteCandidate) {
+                        return;
+                    }
+                    deleteNetwork.mutate(deleteCandidate.id, {
+                        onSuccess: () => {
+                            showNotification({ type: "success", message: "Network removed", description: deleteCandidate.name });
+                            setDeleteCandidate(null);
+                        },
+                        onError: (error: any) => showNotification({ type: "error", message: "Remove network failed", description: humanizeNetworkError(error?.message || `Unable to remove ${deleteCandidate.name}`) }),
+                    });
+                }}
+                pending={deleteNetwork.isPending}
+                tone="danger"
+            />
         </div>
     );
+}
+
+function humanizeNetworkError(message: string) {
+    if (message.includes("not a swarm manager")) {
+        return "Overlay networks need Docker Swarm manager mode on this host. Run docker swarm init or switch to a non-overlay driver.";
+    }
+    if (message.includes("network") && message.includes("not found")) {
+        return "The selected network no longer exists on the Docker host. Refresh the list and try the action again.";
+    }
+    return message;
 }

@@ -2,11 +2,13 @@ import { type ReactNode, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   Activity,
+  Boxes,
   CheckCircle2,
   Cpu,
   Globe,
   HardDrive,
   Info,
+  Layers3,
   Save,
   Server,
   Shield,
@@ -82,7 +84,11 @@ export default function ServerGeneralSettings() {
         name: form.name.trim(),
         hostname: form.hostname.trim(),
         description: form.description.trim(),
+        ip_address: server?.ip_address,
+        os: server?.os,
+        os_version: server?.os_version,
         environment: form.environment,
+        connection_mode: server?.connection_mode,
         ssh_user: form.ssh_user.trim(),
         ssh_port: Number.parseInt(form.ssh_port, 10) || 22,
         tags: form.tags.split(",").map((item) => item.trim()).filter(Boolean),
@@ -244,6 +250,18 @@ export default function ServerGeneralSettings() {
               <HardwareRow label="Disk" value={formatHardwareValue(hardware.diskGB, agentStatus?.online, " GB")} />
               <HardwareRow label="Agent Version" value={hardware.agentVersion} />
               <HardwareRow label="Onboarding" value={hardware.onboarding} />
+              <IntegrationRow
+                icon={<Boxes size={14} className="text-sky-400" />}
+                label="Docker Runtime"
+                state={agentStatus?.has_docker ? "detected" : agentStatus?.online ? "not detected" : "pending"}
+                helper={agentStatus?.has_docker ? "This node can be promoted into Docker management flows." : "No Docker capability reported yet."}
+              />
+              <IntegrationRow
+                icon={<Layers3 size={14} className="text-violet-400" />}
+                label="Kubernetes Tooling"
+                state={agentStatus?.has_k8s ? "detected" : agentStatus?.online ? "not detected" : "pending"}
+                helper={agentStatus?.has_k8s ? "This node can be used for K8s-aware workflows." : "No Kubernetes capability reported yet."}
+              />
               <div className="rounded-lg border border-emerald-100/60 bg-emerald-50 p-3 text-[12px] font-medium text-emerald-700 dark:border-emerald-900/30 dark:bg-emerald-900/10 dark:text-emerald-300">
                 <div className="mb-1 flex items-center gap-1.5 font-bold">
                   <CheckCircle2 size={13} />
@@ -308,6 +326,33 @@ function HardwareRow({ label, value }: { label: string; value: string }) {
       <span className="rounded-md border border-zinc-200/50 bg-zinc-100 px-2 py-0.5 font-mono text-[12px] font-bold text-zinc-700 dark:border-zinc-800/50 dark:bg-[#1A1A1A] dark:text-zinc-300">
         {value}
       </span>
+    </div>
+  );
+}
+
+function IntegrationRow({
+  icon,
+  label,
+  state,
+  helper,
+}: {
+  icon: ReactNode;
+  label: string;
+  state: string;
+  helper: string;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200/60 bg-zinc-50/70 px-3 py-3 dark:border-zinc-800/60 dark:bg-zinc-950/50">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
+          {icon}
+          {label}
+        </div>
+        <span className="rounded-full border border-zinc-200/60 bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+          {state}
+        </span>
+      </div>
+      <div className="mt-2 text-[12px] text-zinc-500 dark:text-zinc-400">{helper}</div>
     </div>
   );
 }

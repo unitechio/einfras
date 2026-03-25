@@ -4,15 +4,37 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 
 export interface Environment {
     id: string;
+    serverId?: string;
     name: string;
     type: "docker" | "kubernetes";
     status: "up" | "down";
     url: string;
+    selfHost?: boolean;
+    os?: string;
+    arch?: string;
+    lastSeen?: string;
+    cpuCores?: number;
+    memoryGB?: number;
+    diskGB?: number;
+    cpuPercent?: number;
+    memPercent?: number;
+    diskPercent?: number;
     stats?: {
-        stacks: number;
-        containers: number;
-        images: number;
-        volumes: number;
+        stacks?: number;
+        containers?: number;
+        images?: number;
+        volumes?: number;
+        nodes?: number;
+        readyNodes?: number;
+        namespaces?: number;
+        pods?: number;
+        serverVersion?: string;
+        storageDriver?: string;
+        kernelVersion?: string;
+        dockerRootDir?: string;
+        memTotal?: number;
+        currentContext?: string;
+        operatingSystem?: string;
     };
 }
 

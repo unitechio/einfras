@@ -39,6 +39,9 @@ func (r *Repository) GetByIPAddress(ctx context.Context, ip string) (*domain.Ser
 
 func (r *Repository) List(ctx context.Context, filter domain.ServerFilter) ([]*domain.Server, int64, error) {
 	query := r.db.WithContext(ctx).Model(&domain.Server{})
+	if filter.TenantID != "" {
+		query = query.Where("tenant_id = ?", filter.TenantID)
+	}
 	if filter.Status != "" {
 		query = query.Where("status = ?", filter.Status)
 	}
@@ -50,6 +53,10 @@ func (r *Repository) List(ctx context.Context, filter domain.ServerFilter) ([]*d
 	}
 	if filter.Provider != "" {
 		query = query.Where("provider = ?", filter.Provider)
+	}
+	if filter.Search != "" {
+		needle := "%" + filter.Search + "%"
+		query = query.Where("name ILIKE ? OR hostname ILIKE ? OR ip_address ILIKE ? OR description ILIKE ?", needle, needle, needle, needle)
 	}
 
 	var total int64

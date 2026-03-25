@@ -1166,8 +1166,12 @@ func normalizePrincipals(items []string) []string {
 
 func runPrivilegedCommand(ctx context.Context, args ...string) (string, int, error) {
 	command := args
-	if commandExists("sudo") {
-		command = append([]string{"sudo"}, args...)
+	if runtime.GOOS != "windows" && !runningAsRoot() {
+		if commandExists("sudo") {
+			command = append([]string{"sudo", "-n"}, args...)
+		} else {
+			return "", 1, errors.New("agent must run as root or have passwordless sudo for access mutations")
+		}
 	}
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	out, err := cmd.CombinedOutput()
@@ -1180,12 +1184,34 @@ func runPrivilegedCommand(ctx context.Context, args ...string) (string, int, err
 	return strings.TrimSpace(string(out)), 0, nil
 }
 
+func runningAsRoot() bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	out, err := exec.Command("id", "-u").Output()
+	if err != nil {
+		return strings.EqualFold(strings.TrimSpace(os.Getenv("USER")), "root")
+	}
+	return strings.TrimSpace(string(out)) == "0"
+}
+
 func commandFailure(operation, summary, preview string, exitCode int, err error) (string, int, error) {
+	detailedSummary := strings.TrimSpace(summary)
+	if err != nil {
+		reason := strings.TrimSpace(err.Error())
+		if reason != "" && !strings.Contains(strings.ToLower(detailedSummary), strings.ToLower(reason)) {
+			detailedSummary = fmt.Sprintf("%s: %s", detailedSummary, reason)
+		}
+	}
+	preview = strings.TrimSpace(preview)
+	if preview == "" {
+		preview = detailedSummary
+	}
 	result, _, marshalErr := marshalResult(agent.TypedControlResult{
 		Operation: operation,
 		Status:    "failed",
-		Summary:   summary,
-		Preview:   strings.TrimSpace(preview),
+		Summary:   detailedSummary,
+		Preview:   preview,
 	})
 	if marshalErr != nil {
 		return "", exitCode, marshalErr

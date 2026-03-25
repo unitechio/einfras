@@ -1,3 +1,6 @@
+//go:build legacy
+// +build legacy
+
 // Package docker provides HTTP handlers for managing Docker resources.
 package docker
 

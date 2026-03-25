@@ -57,26 +57,9 @@ export const useServers = (filter: ServerFilter = { page: 1, page_size: 20 }) =>
         provider: filter.provider,
         search: filter.search,
       });
-      const mapped = res.data.map(mapServer);
-      const normalizedSearch = filter.search?.trim().toLowerCase();
-      const filtered = normalizedSearch
-        ? mapped.filter((server) =>
-            [
-              server.name,
-              server.hostname,
-              server.ip_address,
-              server.description,
-              server.location,
-              server.provider,
-              ...(server.tags ?? []),
-            ]
-              .filter(Boolean)
-              .some((value) => String(value).toLowerCase().includes(normalizedSearch)),
-          )
-        : mapped;
       return {
-        data: filtered,
-        total: normalizedSearch ? filtered.length : res.total,
+        data: res.data.map(mapServer),
+        total: res.total,
         page: res.page,
         page_size: res.page_size,
       };

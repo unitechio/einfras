@@ -1,3 +1,6 @@
+//go:build legacy
+// +build legacy
+
 // Package middleware provides reusable HTTP middleware for the API server.
 package middleware
 

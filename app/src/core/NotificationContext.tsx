@@ -54,7 +54,18 @@ export function NotificationProvider({
 
   const showNotification = useCallback((n: Omit<Notification, "id">) => {
     const id = Math.random().toString(36).substring(2, 9);
-    setNotifications((prev) => [...prev, { ...n, id }]);
+    setNotifications((prev) => {
+      const duplicateExists = prev.some(
+        (item) =>
+          item.type === n.type &&
+          item.message === n.message &&
+          item.description === n.description,
+      );
+      if (duplicateExists) {
+        return prev;
+      }
+      return [...prev, { ...n, id }];
+    });
   }, []);
 
   return (

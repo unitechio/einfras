@@ -1,3 +1,6 @@
+//go:build legacy
+// +build legacy
+
 // Package orghandler provides REST handlers for Organization management.
 // Routes (all under /api/v1/orgs):
 //

@@ -99,6 +99,7 @@ export default function Topbar({
 
         {/* Notifications */}
         <Popover
+          popoverId="topbar-notifications"
           trigger={
             <button className="relative p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800/80 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-all active:scale-95">
               <Bell size={15} />
@@ -112,7 +113,10 @@ export default function Topbar({
                 <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
                   Notifications
                 </span>
-                <button className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-medium transition-colors">
+                <button
+                  onClick={() => navigate("/notifications")}
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-medium transition-colors"
+                >
                   Mark all read
                 </button>
               </div>
@@ -142,7 +146,10 @@ export default function Topbar({
               </div>
               {/* Footer */}
               <div className="px-4 py-2.5 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/20">
-                <button className="text-xs font-medium text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400 w-full text-center transition-colors py-1">
+                <button
+                  onClick={() => navigate("/notifications")}
+                  className="text-xs font-medium text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400 w-full text-center transition-colors py-1"
+                >
                   View all notifications
                 </button>
               </div>
@@ -155,6 +162,7 @@ export default function Topbar({
 
         {/* User Account Trigger */}
         <Popover
+          popoverId="topbar-user-menu"
           trigger={
             <button className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-all group select-none">
               {/* Avatar */}

@@ -41,9 +41,10 @@ const (
 type ServerConnectionMode string
 
 const (
-	ServerConnectionModeAgent  ServerConnectionMode = "agent"
-	ServerConnectionModeSSH    ServerConnectionMode = "ssh"
-	ServerConnectionModeHybrid ServerConnectionMode = "hybrid"
+	ServerConnectionModeAgent   ServerConnectionMode = "agent"
+	ServerConnectionModeSSH     ServerConnectionMode = "ssh"
+	ServerConnectionModeBastion ServerConnectionMode = "bastion"
+	ServerConnectionModeHybrid  ServerConnectionMode = "hybrid"
 )
 
 type ServerOnboardingStatus string
@@ -76,10 +77,15 @@ type Server struct {
 	DiskGB           int                    `json:"disk_gb" gorm:"column:disk_gb" db:"disk_gb"`
 
 	// SSH Configuration
-	SSHPort     int    `json:"ssh_port" gorm:"column:ssh_port" db:"ssh_port"`
-	SSHUser     string `json:"ssh_user" gorm:"column:ssh_user" db:"ssh_user"`
-	SSHPassword string `json:"ssh_password,omitempty" gorm:"column:ssh_password" db:"ssh_password"`
-	SSHKeyPath  string `json:"ssh_key_path,omitempty" gorm:"column:ssh_key_path" db:"ssh_key_path"`
+	SSHPort       int    `json:"ssh_port" gorm:"column:ssh_port" db:"ssh_port"`
+	SSHUser       string `json:"ssh_user" gorm:"column:ssh_user" db:"ssh_user"`
+	SSHPassword   string `json:"ssh_password,omitempty" gorm:"column:ssh_password" db:"ssh_password"`
+	SSHKeyPath    string `json:"ssh_key_path,omitempty" gorm:"column:ssh_key_path" db:"ssh_key_path"`
+	TunnelEnabled bool   `json:"tunnel_enabled" gorm:"column:tunnel_enabled" db:"tunnel_enabled"`
+	TunnelHost    string `json:"tunnel_host,omitempty" gorm:"column:tunnel_host" db:"tunnel_host"`
+	TunnelPort    int    `json:"tunnel_port,omitempty" gorm:"column:tunnel_port" db:"tunnel_port"`
+	TunnelUser    string `json:"tunnel_user,omitempty" gorm:"column:tunnel_user" db:"tunnel_user"`
+	TunnelKeyPath string `json:"tunnel_key_path,omitempty" gorm:"column:tunnel_key_path" db:"tunnel_key_path"`
 
 	Tags         []string   `json:"tags" gorm:"serializer:json;column:tags" db:"tags"`
 	LastCheckAt  *time.Time `json:"last_check_at,omitempty" gorm:"column:last_check_at" db:"last_check_at"`
@@ -91,10 +97,12 @@ type Server struct {
 func (Server) TableName() string { return "servers" }
 
 type ServerFilter struct {
+	TenantID string       `json:"tenant_id"`
 	Status   ServerStatus `json:"status"`
 	OS       ServerOS     `json:"os"`
 	Location string       `json:"location"`
 	Provider string       `json:"provider"`
+	Search   string       `json:"search"`
 	Tags     []string     `json:"tags"`
 	Page     int          `json:"page"`
 	PageSize int          `json:"page_size"`
@@ -204,6 +212,36 @@ type ServiceFilter struct {
 	Page     int    `json:"page"`
 	PageSize int    `json:"page_size"`
 }
+
+type ServiceInstallPlanMode string
+
+const (
+	ServiceInstallPlanModePublic  ServiceInstallPlanMode = "public"
+	ServiceInstallPlanModePrivate ServiceInstallPlanMode = "private"
+	ServiceInstallPlanModeRelay   ServiceInstallPlanMode = "relay"
+)
+
+type ServiceInstallPlanStatus string
+
+const (
+	ServiceInstallPlanStatusPending ServiceInstallPlanStatus = "pending"
+	ServiceInstallPlanStatusPlanned ServiceInstallPlanStatus = "planned"
+)
+
+type ServerServiceInstallPlan struct {
+	ID           string                   `json:"id" gorm:"column:id;primaryKey" db:"id"`
+	ServerID     string                   `json:"server_id" gorm:"column:server_id;index" db:"server_id"`
+	Mode         ServiceInstallPlanMode   `json:"mode" gorm:"column:mode" db:"mode"`
+	PackageName  string                   `json:"package_name,omitempty" gorm:"column:package_name" db:"package_name"`
+	ArtifactName string                   `json:"artifact_name,omitempty" gorm:"column:artifact_name" db:"artifact_name"`
+	RelayHost    string                   `json:"relay_host,omitempty" gorm:"column:relay_host" db:"relay_host"`
+	Status       ServiceInstallPlanStatus `json:"status" gorm:"column:status" db:"status"`
+	Notes        string                   `json:"notes,omitempty" gorm:"column:notes" db:"notes"`
+	CreatedAt    time.Time                `json:"created_at" gorm:"column:created_at" db:"created_at"`
+	UpdatedAt    time.Time                `json:"updated_at" gorm:"column:updated_at" db:"updated_at"`
+}
+
+func (ServerServiceInstallPlan) TableName() string { return "server_service_install_plans" }
 
 // --- Cronjob ---
 
@@ -494,6 +532,11 @@ type ServerServiceRepository interface {
 	List(ctx context.Context, filter ServiceFilter) ([]*ServerService, int64, error)
 	Update(ctx context.Context, service *ServerService) error
 	Delete(ctx context.Context, id string) error
+}
+
+type ServerServiceInstallPlanRepository interface {
+	Create(ctx context.Context, plan *ServerServiceInstallPlan) error
+	ListByServerID(ctx context.Context, serverID string) ([]*ServerServiceInstallPlan, error)
 }
 
 type ServerCronjobRepository interface {

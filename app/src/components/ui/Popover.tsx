@@ -13,11 +13,13 @@ interface PopoverProps {
     content: React.ReactNode;
     align?: "left" | "right";
     className?: string;
+    popoverId?: string;
 }
 
-export default function Popover({ trigger, content, align = "right", className }: PopoverProps) {
+export default function Popover({ trigger, content, align = "right", className, popoverId }: PopoverProps) {
     const [isOpen, setIsOpen] = useState(false);
     const popoverRef = useRef<HTMLDivElement>(null);
+    const instanceId = useRef(popoverId ?? `popover-${Math.random().toString(36).slice(2, 9)}`);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -25,17 +27,35 @@ export default function Popover({ trigger, content, align = "right", className }
                 setIsOpen(false);
             }
         };
+        const handlePopoverOpen = (event: Event) => {
+            const detail = (event as CustomEvent<{ id?: string }>).detail;
+            if (detail?.id && detail.id !== instanceId.current) {
+                setIsOpen(false);
+            }
+        };
 
         document.addEventListener("mousedown", handleClickOutside);
+        window.addEventListener("einfra:popover-open", handlePopoverOpen as EventListener);
         return () => {
             document.removeEventListener("mousedown", handleClickOutside);
+            window.removeEventListener("einfra:popover-open", handlePopoverOpen as EventListener);
         };
     }, []);
+
+    const togglePopover = () => {
+        setIsOpen((current) => {
+            const next = !current;
+            if (next) {
+                window.dispatchEvent(new CustomEvent("einfra:popover-open", { detail: { id: instanceId.current } }));
+            }
+            return next;
+        });
+    };
 
     return (
         <div className="relative" ref={popoverRef}>
             <div
-                onClick={() => setIsOpen(!isOpen)}
+                onClick={togglePopover}
                 className="cursor-pointer"
             >
                 {trigger}

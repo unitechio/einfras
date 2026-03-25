@@ -7,6 +7,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"einfra/api/internal/modules/iam"
 	managementapp "einfra/api/internal/modules/server/application/management"
 	domain "einfra/api/internal/modules/server/domain"
 )
@@ -37,6 +38,7 @@ func (h *Handler) createServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	server := domain.Server{
+		TenantID:       iam.OrganizationIDFromContext(r.Context()),
 		Name:           request.Name,
 		Description:    request.Description,
 		Hostname:       request.Hostname,
@@ -54,6 +56,11 @@ func (h *Handler) createServer(w http.ResponseWriter, r *http.Request) {
 		SSHUser:        request.SSHUser,
 		SSHPassword:    request.SSHPassword,
 		SSHKeyPath:     request.SSHKeyPath,
+		TunnelEnabled:  request.TunnelEnabled,
+		TunnelHost:     request.TunnelHost,
+		TunnelPort:     request.TunnelPort,
+		TunnelUser:     request.TunnelUser,
+		TunnelKeyPath:  request.TunnelKeyPath,
 		Tags:           request.Tags,
 	}
 	if err := h.service.RegisterServer(r.Context(), &server); err != nil {
@@ -65,10 +72,12 @@ func (h *Handler) createServer(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listServers(w http.ResponseWriter, r *http.Request) {
 	filter := domain.ServerFilter{
+		TenantID: iam.OrganizationIDFromContext(r.Context()),
 		Status:   domain.ServerStatus(r.URL.Query().Get("status")),
 		OS:       domain.ServerOS(r.URL.Query().Get("os")),
 		Location: r.URL.Query().Get("location"),
 		Provider: r.URL.Query().Get("provider"),
+		Search:   r.URL.Query().Get("search"),
 		Page:     parseInt(r.URL.Query().Get("page"), 1),
 		PageSize: parseInt(r.URL.Query().Get("page_size"), 20),
 	}
@@ -127,6 +136,11 @@ func (h *Handler) updateServer(w http.ResponseWriter, r *http.Request) {
 		server.SSHPassword = request.SSHPassword
 	}
 	server.SSHKeyPath = request.SSHKeyPath
+	server.TunnelEnabled = request.TunnelEnabled
+	server.TunnelHost = request.TunnelHost
+	server.TunnelPort = request.TunnelPort
+	server.TunnelUser = request.TunnelUser
+	server.TunnelKeyPath = request.TunnelKeyPath
 	server.Tags = request.Tags
 	if err := h.service.UpdateServer(r.Context(), &server); err != nil {
 		writeError(w, http.StatusBadRequest, "server", "server.update", "update_failed", err.Error(), map[string]any{"id": serverID})

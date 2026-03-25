@@ -18,10 +18,16 @@ import {
   HardDrive,
   Share2,
   Monitor,
+  Globe,
+  Boxes,
+  HeartPulse,
   ChevronDown,
+  Tag,
   X,
 } from "lucide-react";
 import { useEnvironment } from "@/core/EnvironmentContext";
+import { useGenericKubernetesResources } from "@/features/kubernetes/api/useKubernetesHooks";
+import { useRuntimeFeatureFlags } from "@/features/settings/useRuntimeFeatureFlags";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -41,12 +47,29 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const { selectedEnvironment, setSelectedEnvironment, isEnvironmentMode } =
     useEnvironment();
-  const [expanded, setExpanded] = useState<string[]>([]);
+  const [expanded, setExpanded] = useState<Record<number, string>>({});
+  const featureFlags = useRuntimeFeatureFlags();
+  const { data: dynamicCRDs = [] } = useGenericKubernetesResources(
+    selectedEnvironment?.type === "kubernetes" ? selectedEnvironment.id : "",
+    "customresourcedefinitions",
+    "default",
+    false,
+    {
+      enabled: selectedEnvironment?.type === "kubernetes",
+      watch: true,
+    },
+  );
 
-  const toggle = (key: string) => {
-    setExpanded((prev) =>
-      prev.includes(key) ? prev.filter((i) => i !== key) : [...prev, key],
-    );
+  const toggle = (key: string, depth: number) => {
+    setExpanded((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([level]) => Number(level) < depth),
+      ) as Record<number, string>;
+      if (prev[depth] !== key) {
+        next[depth] = key;
+      }
+      return next;
+    });
   };
 
   const adminMenu: MenuItem[] = [
@@ -67,7 +90,7 @@ export default function Sidebar() {
         { icon: Cloud, label: "Environments", path: "/environments" },
         { icon: Server, label: "Servers", path: "/servers" },
         { icon: Cuboid, label: "Applications", path: "/applications" },
-        { label: "Tags", path: "/tags" },
+        { icon: Tag, label: "Tags", path: "/tags" },
       ],
     },
     { icon: Database, label: "Registries", path: "/registries" },
@@ -85,29 +108,140 @@ export default function Sidebar() {
       items: [
         { label: "General", path: "/settings/general" },
         { label: "Authentication", path: "/settings/authentication" },
-        { label: "Edge Compute", path: "/settings/edge-compute" },
+        ...(featureFlags.isEnabled("edge_compute", true)
+          ? [{ label: "Edge Compute", path: "/settings/edge-compute" }]
+          : []),
+        ...(featureFlags.isEnabled("notification_routing", true)
+          ? [
+              {
+                label: "Notification Routing",
+                path: "/settings/notification-routing",
+              },
+            ]
+          : []),
+        { label: "Feature Flags", path: "/settings/feature-flags" },
+        ...(featureFlags.isEnabled("license_management", true)
+          ? [{ label: "License Keys", path: "/settings/license" }]
+          : []),
       ],
     },
   ];
 
-  const envMenu: MenuItem[] = [
-    { type: "header", label: selectedEnvironment?.name || "Environment" },
-    { icon: Home, label: "Dashboard", path: "/dashboard" },
-    {
-      icon: FileCode,
-      label: "Templates",
-      items: [
-        { label: "App Templates", path: "/templates" },
-        { label: "Custom Templates", path: "/templates/custom" },
-      ],
-    },
-    { icon: Layers, label: "Stacks", path: "/stacks" },
-    { icon: Box, label: "Containers", path: "/containers" },
-    { icon: Monitor, label: "Images", path: "/images" },
-    { icon: Share2, label: "Networks", path: "/networks" },
-    { icon: HardDrive, label: "Volumes", path: "/volumes" },
-    { icon: Activity, label: "Events", path: "/events" },
-  ];
+  const envMenu: MenuItem[] =
+    selectedEnvironment?.type === "kubernetes"
+      ? [
+          { icon: Home, label: "Dashboard", path: "/dashboard" },
+          {
+            icon: Layers,
+            label: "Workloads",
+            items: [
+              { icon: Cuboid, label: "Pods", path: "/pods" },
+              { icon: Layers, label: "Deployments", path: "/deployments" },
+              { icon: Layers, label: "StatefulSets", path: "/statefulsets" },
+              { icon: Layers, label: "DaemonSets", path: "/daemonsets" },
+              { icon: Layers, label: "ReplicaSets", path: "/replicasets" },
+              { icon: Activity, label: "Jobs", path: "/jobs" },
+              { icon: Activity, label: "CronJobs", path: "/jobs?tab=cronjobs" },
+            ],
+          },
+          {
+            icon: Share2,
+            label: "Network",
+            items: [
+              { icon: Share2, label: "Services", path: "/services" },
+              { icon: Share2, label: "Endpoints", path: "/endpoints" },
+              {
+                icon: Share2,
+                label: "EndpointSlices",
+                path: "/endpointslices",
+              },
+              { icon: Globe, label: "Ingresses", path: "/ingresses" },
+              { icon: Globe, label: "IngressClasses", path: "/ingressclasses" },
+              { icon: Globe, label: "Gateways", path: "/gateways" },
+              { icon: Globe, label: "GatewayClasses", path: "/gatewayclasses" },
+              { icon: Globe, label: "HTTPRoutes", path: "/httproutes" },
+              {
+                icon: Shield,
+                label: "NetworkPolicies",
+                path: "/networkpolicies",
+              },
+            ],
+          },
+          {
+            icon: Database,
+            label: "Configuration",
+            items: [
+              { icon: Database, label: "ConfigMaps", path: "/configmaps" },
+              { icon: Shield, label: "Secrets", path: "/secrets" },
+              {
+                icon: Database,
+                label: "StorageClasses",
+                path: "/storageclasses",
+              },
+            ],
+          },
+          {
+            icon: Shield,
+            label: "RBAC",
+            items: [
+              {
+                icon: Shield,
+                label: "ServiceAccounts",
+                path: "/serviceaccounts",
+              },
+              { icon: Shield, label: "Roles", path: "/roles-k8s" },
+              { icon: Shield, label: "RoleBindings", path: "/rolebindings" },
+              { icon: Shield, label: "Cluster Roles", path: "/clusterroles" },
+              {
+                icon: Shield,
+                label: "Cluster Role Bindings",
+                path: "/clusterrolebindings",
+              },
+            ],
+          },
+          {
+            icon: Server,
+            label: "Cluster",
+            items: [
+              { icon: HardDrive, label: "Nodes", path: "/nodes" },
+              { icon: Layers, label: "Namespaces", path: "/namespaces" },
+              { icon: Activity, label: "Search", path: "/kubernetes-search" },
+              { icon: Database, label: "Storage", path: "/persistent-volumes" },
+              { icon: Activity, label: "Autoscaling", path: "/hpa" },
+              { icon: Activity, label: "VPA", path: "/vpa" },
+              { icon: Database, label: "CRDs", path: "/crds" },
+              ...buildDynamicCRDMenus(dynamicCRDs),
+              { icon: Globe, label: "Topology", path: "/kubernetes-topology" },
+              { icon: Box, label: "Helm", path: "/helm" },
+              { icon: Activity, label: "Events", path: "/events" },
+              { icon: Cloud, label: "Environments", path: "/environments" },
+            ],
+          },
+        ]
+      : [
+          { icon: Home, label: "Dashboard", path: "/dashboard" },
+          {
+            icon: FileCode,
+            label: "Templates",
+            items: [
+              { label: "App Templates", path: "/templates" },
+              { label: "Custom Templates", path: "/templates/custom" },
+            ],
+          },
+          { icon: Layers, label: "Stacks", path: "/stacks" },
+          { icon: Box, label: "Containers", path: "/containers" },
+          { icon: Server, label: "Nodes", path: "/nodes" },
+          { icon: Activity, label: "Logs", path: "/logs" },
+          ...(featureFlags.isEnabled("runtime_topology", true)
+            ? [{ icon: Boxes, label: "Topology", path: "/topology" }]
+            : []),
+          { icon: HeartPulse, label: "Auto-Heal", path: "/auto-heal" },
+          { icon: Monitor, label: "Images", path: "/images" },
+          { icon: Box, label: "Build & Import", path: "/images/build" },
+          { icon: Share2, label: "Networks", path: "/networks" },
+          { icon: HardDrive, label: "Volumes", path: "/volumes" },
+          { icon: Globe, label: "Events", path: "/events" },
+        ];
 
   const menu = isEnvironmentMode ? envMenu : adminMenu;
 
@@ -160,8 +294,10 @@ export default function Sidebar() {
             key={idx}
             item={item}
             collapsed={collapsed}
-            expanded={expanded.includes(item.label)}
-            onToggle={() => toggle(item.label)}
+            expandedKeys={expanded}
+            onToggle={toggle}
+            itemKey={item.label}
+            depth={0}
           />
         ))}
       </nav>
@@ -186,7 +322,14 @@ export default function Sidebar() {
   );
 }
 
-function NavItem({ item, collapsed, expanded, onToggle }: any) {
+function NavItem({
+  item,
+  collapsed,
+  expandedKeys,
+  onToggle,
+  itemKey,
+  depth = 0,
+}: any) {
   if (item.type === "header") {
     return !collapsed ? (
       <div className="px-3 pt-4 pb-2 text-xs text-zinc-400 uppercase">
@@ -197,6 +340,7 @@ function NavItem({ item, collapsed, expanded, onToggle }: any) {
 
   const Icon = item.icon;
   const hasChildren = item.items;
+  const expanded = expandedKeys?.[depth] === itemKey;
 
   if (!hasChildren) {
     return (
@@ -214,7 +358,11 @@ function NavItem({ item, collapsed, expanded, onToggle }: any) {
         }
       >
         {Icon && <Icon size={16} />}
-        {!collapsed && <span className="text-sm">{item.label}</span>}
+        {!collapsed && (
+          <span className="min-w-0 flex-1 break-words text-left text-sm leading-snug">
+            {item.label}
+          </span>
+        )}
       </NavLink>
     );
   }
@@ -222,7 +370,7 @@ function NavItem({ item, collapsed, expanded, onToggle }: any) {
   return (
     <div>
       <button
-        onClick={onToggle}
+        onClick={() => onToggle(itemKey, depth)}
         className={cn(
           "flex items-center justify-between w-full px-3 py-2.5 rounded-xl",
           "text-zinc-500 hover:text-zinc-900 dark:hover:text-white",
@@ -230,9 +378,13 @@ function NavItem({ item, collapsed, expanded, onToggle }: any) {
           collapsed && "justify-center",
         )}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           {Icon && <Icon size={16} />}
-          {!collapsed && <span className="text-sm">{item.label}</span>}
+          {!collapsed && (
+            <span className="min-w-0 flex-1 break-words text-left text-sm leading-snug">
+              {item.label}
+            </span>
+          )}
         </div>
 
         {!collapsed && (
@@ -246,28 +398,86 @@ function NavItem({ item, collapsed, expanded, onToggle }: any) {
       {!collapsed && (
         <div
           className={cn(
-            "pl-9 overflow-hidden transition-all duration-300",
-            expanded ? "max-h-96 opacity-100" : "max-h-0 opacity-0",
+            "overflow-hidden transition-all duration-300",
+            depth === 0 ? "pl-9" : "pl-4",
+            expanded
+              ? "max-h-[70vh] overflow-y-auto opacity-100"
+              : "max-h-0 opacity-0",
           )}
         >
           {item.items.map((sub: any, i: number) => (
-            <NavLink
-              key={i}
-              to={sub.path}
-              className={({ isActive }) =>
-                cn(
-                  "block px-3 py-1.5 text-sm rounded-md",
-                  isActive
-                    ? "text-blue-600 dark:text-white bg-blue-500/10"
-                    : "text-zinc-400 hover:text-zinc-900 dark:hover:text-white",
-                )
-              }
-            >
-              {sub.label}
-            </NavLink>
+            <NavItem
+              key={`${sub.label}-${i}`}
+              item={sub}
+              collapsed={false}
+              expandedKeys={expandedKeys}
+              onToggle={onToggle}
+              itemKey={`${itemKey}/${sub.label}`}
+              depth={depth + 1}
+            />
           ))}
         </div>
       )}
     </div>
   );
+}
+
+function buildDynamicCRDMenus(
+  resources: Array<{
+    name?: string;
+    group?: string;
+    version?: string;
+    plural?: string;
+    resource_kind?: string;
+    scope?: string;
+  }>,
+): MenuItem[] {
+  if (!resources.length) {
+    return [];
+  }
+
+  const groups = new Map<string, MenuItem[]>();
+  resources.forEach((resource: any) => {
+    const group = resource.group || resource.detail || "Custom Resources";
+    const namespaced = String(resource.scope || "").toLowerCase() !== "cluster";
+    const params = new URLSearchParams({
+      kind: resource.plural || resource.name || "",
+      title:
+        resource.resource_kind ||
+        resource.plural ||
+        resource.name ||
+        "Custom Resource",
+      namespaced: namespaced ? "true" : "false",
+      resourceKind: resource.resource_kind || "",
+      apiVersion:
+        resource.group && resource.version
+          ? `${resource.group}/${resource.version}`
+          : resource.group || "",
+    });
+    const items = groups.get(group) || [];
+    items.push({
+      label:
+        resource.resource_kind ||
+        resource.plural ||
+        resource.name ||
+        "Resource",
+      path: `/custom-resources?${params.toString()}`,
+    });
+    groups.set(group, items);
+  });
+
+  return [
+    {
+      icon: Database,
+      label: "Custom Resources",
+      items: Array.from(groups.entries())
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([group, items]) => ({
+          label: group,
+          items: items.sort((left, right) =>
+            left.label.localeCompare(right.label),
+          ),
+        })),
+    },
+  ];
 }

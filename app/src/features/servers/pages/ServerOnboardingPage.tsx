@@ -304,7 +304,7 @@ export default function ServerOnboardingPage() {
         connection_mode: form.connectionMode,
         ssh_port:
           Number.parseInt(form.port, 10) || (form.os === "windows" ? 5985 : 22),
-        ssh_user: form.privilege.user.trim() || form.sshUser.trim() || "root",
+        ssh_user: form.sshUser.trim() || form.privilege.user.trim() || "root",
         ssh_password:
           form.connectionMode === "agent" || form.authMethod !== "password"
             ? undefined
@@ -314,6 +314,23 @@ export default function ServerOnboardingPage() {
             ? undefined
             : form.sshKeyPath.trim(),
         tags: parseTags(form.tags),
+        tunnel_enabled: form.connectionMode === "bastion",
+        tunnel_host:
+          form.connectionMode === "bastion"
+            ? form.bastionHost.trim()
+            : undefined,
+        tunnel_port:
+          form.connectionMode === "bastion"
+            ? Number.parseInt(form.port, 10) || (form.os === "windows" ? 5985 : 22)
+            : undefined,
+        tunnel_user:
+          form.connectionMode === "bastion"
+            ? form.sshUser.trim() || form.privilege.user.trim() || "root"
+            : undefined,
+        tunnel_key_path:
+          form.connectionMode === "bastion" && form.authMethod === "ssh_key"
+            ? form.sshKeyPath.trim()
+            : undefined,
       });
 
       if (form.connectionMode !== "agent") {
@@ -321,7 +338,12 @@ export default function ServerOnboardingPage() {
         setNotice({
           type: "success",
           title: "Server created",
-          description: "Direct-managed node has been registered successfully.",
+          description:
+            form.connectionMode === "bastion"
+              ? "Node record was created. Bastion relay metadata is captured in the onboarding summary, while full relay orchestration is still being polished."
+              : form.os === "windows"
+                ? "Windows / WinRM-style node record was created. Use the saved connection settings below to complete the first remote validation."
+                : "Direct-managed node has been registered successfully.",
         });
         showNotification({
           type: "success",
@@ -586,6 +608,25 @@ export default function ServerOnboardingPage() {
                 <FieldErrorText message={fieldErrors.sshUser} />
               </Field>
             </div>
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+              {form.connectionMode === "agent" ? (
+                <div>
+                  Agent mode is best for production and private networks because the node connects outward to EINFRA, so you do not need inbound SSH/WinRM opened first.
+                </div>
+              ) : form.connectionMode === "bastion" ? (
+                <div>
+                  Bastion mode stores this node as a jump-host-managed target. The bastion endpoint is saved into the server tunnel metadata so follow-up management flows know a relay is required.
+                </div>
+              ) : form.os === "windows" ? (
+                <div>
+                  WinRM mode expects a Windows host reachable on port <span className="font-semibold">5985</span> or <span className="font-semibold">5986</span>. Use Agent mode if you want a more reliable first-time onboarding path.
+                </div>
+              ) : (
+                <div>
+                  Direct mode uses SSH straight to the target node. Make sure the login user and port are reachable before you continue.
+                </div>
+              )}
+            </div>
             {form.connectionMode === "bastion" && (
               <Field label="Bastion Host" required>
                 <Input
@@ -595,6 +636,9 @@ export default function ServerOnboardingPage() {
                   className={inputErrorClass(fieldErrors.bastionHost)}
                 />
                 <FieldErrorText message={fieldErrors.bastionHost} />
+                <p className="mt-2 text-xs text-zinc-500">
+                  Example: <span className="font-mono">jump-prod.internal</span> or <span className="font-mono">10.0.0.5</span>. This will be stored with the node so later relay workflows can reuse it.
+                </p>
               </Field>
             )}
           </div>
@@ -699,6 +743,7 @@ export default function ServerOnboardingPage() {
                 <li>Name: {form.name || "-"}</li>
                 <li>Target: {form.ipAddress || "-"}</li>
                 <li>Mode: {form.connectionMode}</li>
+                {form.connectionMode === "bastion" && <li>Bastion: {form.bastionHost || "-"}</li>}
                 <li>
                   Auth:{" "}
                   {form.connectionMode === "agent"
@@ -743,6 +788,9 @@ export default function ServerOnboardingPage() {
                     label="Mode"
                     value={result.server.connection_mode ?? "agent"}
                   />
+                  {form.connectionMode === "bastion" && (
+                    <SummaryRow label="Bastion Host" value={form.bastionHost || "-"} />
+                  )}
                   <SummaryRow
                     label="Onboarding Status"
                     value={result.server.onboarding_status ?? "pending"}
@@ -762,6 +810,15 @@ export default function ServerOnboardingPage() {
                 </div>
 
                 <div className="space-y-5">
+                  {form.connectionMode !== "agent" ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+                      {form.connectionMode === "bastion"
+                        ? "Bastion mode is stored as an onboarding plan in the current backend. Use the Bastion Host value from the summary while relay orchestration is being completed."
+                        : form.os === "windows"
+                          ? "Windows onboarding currently uses the saved host, port, and credential settings. Agent-based automation is still the recommended path for fully hands-off lifecycle management."
+                          : "Direct SSH onboarding is ready. Validate credentials and remote privileges on the node before running higher-risk actions."}
+                    </div>
+                  ) : null}
                   {result.token && (
                     <CopyCard
                       title="Agent Token"
@@ -1261,7 +1318,11 @@ function mapBackendFieldErrors(message: string): FieldErrors {
     lowered.includes("already exists") &&
     (lowered.includes("ip") || lowered.includes("host"))
   ) {
-    errors.ipAddress = "This IP or FQDN is already registered.";
+    if (lowered.includes("127.0.0.1") || lowered.includes("localhost") || lowered.includes("loopback")) {
+      errors.ipAddress = "This local loopback address is still blocked by the current backend schema. Restart the updated API and try again.";
+    } else {
+      errors.ipAddress = "This IP or FQDN is already registered.";
+    }
   }
   if (lowered.includes("hostname")) {
     errors.hostname = "Hostname is invalid or already in use.";

@@ -1,3 +1,6 @@
+//go:build legacy
+// +build legacy
+
 // Package orgstore — audit_repo.go
 // GORM-backed AuditWriter for the middleware.AuditWriter interface.
 package orgstore

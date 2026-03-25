@@ -1,3 +1,6 @@
+//go:build legacy
+// +build legacy
+
 // Package orgstore implements domain.OrganizationRepository using GORM + PostgreSQL.
 package orgstore
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -56,8 +57,10 @@ func (s *Service) RegisterServer(ctx context.Context, server *domain.Server) err
 		return err
 	}
 
-	if existing, err := s.servers.GetByIPAddress(ctx, server.IPAddress); err == nil && existing != nil {
-		return fmt.Errorf("server with ip %s already exists", server.IPAddress)
+	if !isLocalServerAddress(server.IPAddress) {
+		if existing, err := s.servers.GetByIPAddress(ctx, server.IPAddress); err == nil && existing != nil {
+			return fmt.Errorf("server with ip %s already exists", server.IPAddress)
+		}
 	}
 
 	if server.ID == "" {
@@ -112,6 +115,11 @@ func (s *Service) UpdateServer(ctx context.Context, server *domain.Server) error
 	if err != nil {
 		return err
 	}
+	if !isLocalServerAddress(server.IPAddress) {
+		if conflict, err := s.servers.GetByIPAddress(ctx, server.IPAddress); err == nil && conflict != nil && conflict.ID != server.ID {
+			return fmt.Errorf("server with ip %s already exists", server.IPAddress)
+		}
+	}
 	server.CreatedAt = existing.CreatedAt
 	if server.OnboardingStatus == "" {
 		server.OnboardingStatus = existing.OnboardingStatus
@@ -124,6 +132,21 @@ func (s *Service) UpdateServer(ctx context.Context, server *domain.Server) error
 	}
 	server.UpdatedAt = time.Now().UTC()
 	return s.servers.Update(ctx, server)
+}
+
+func isLocalServerAddress(raw string) bool {
+	candidate := strings.TrimSpace(strings.ToLower(raw))
+	if candidate == "" {
+		return false
+	}
+	if candidate == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(candidate)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
 }
 
 func (s *Service) DeleteServer(ctx context.Context, id string) error {
@@ -226,10 +249,13 @@ func validateServer(server *domain.Server) error {
 	if strings.TrimSpace(server.IPAddress) == "" {
 		return errors.New("server ip_address is required")
 	}
-	if server.ConnectionMode == domain.ServerConnectionModeSSH || server.ConnectionMode == domain.ServerConnectionModeHybrid {
+	if server.ConnectionMode == domain.ServerConnectionModeSSH || server.ConnectionMode == domain.ServerConnectionModeHybrid || server.ConnectionMode == domain.ServerConnectionModeBastion {
 		if strings.TrimSpace(server.SSHUser) == "" {
 			return errors.New("ssh_user is required for ssh or hybrid connection modes")
 		}
+	}
+	if server.ConnectionMode == domain.ServerConnectionModeBastion && strings.TrimSpace(server.TunnelHost) == "" {
+		return errors.New("tunnel_host is required for bastion connection mode")
 	}
 	if server.CPUCores < 0 || server.MemoryGB < 0 || server.DiskGB < 0 {
 		return errors.New("resource capacity values must be non-negative")

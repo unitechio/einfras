@@ -6,6 +6,7 @@ import { useNotification } from "@/core/NotificationContext";
 import { accessApi, type TypedControlResult } from "@/shared/api/client";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
+import { ConfirmActionDialog } from "@/shared/ui/ConfirmActionDialog";
 import { Input } from "@/shared/ui/Input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/Table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/Tabs";
@@ -54,6 +55,8 @@ const DEFAULT_GROUP_FORM: GroupFormState = {
   members: "",
 };
 
+const LINUX_ACCOUNT_NAME = /^[a-z_][a-z0-9_-]{0,31}$/;
+
 export default function ServerUsers() {
   const { serverId = "" } = useParams();
   const { showNotification } = useNotification();
@@ -69,9 +72,11 @@ export default function ServerUsers() {
   const [groupForm, setGroupForm] = useState<GroupFormState>(DEFAULT_GROUP_FORM);
   const [userSearch, setUserSearch] = useState("");
   const [groupSearch, setGroupSearch] = useState("");
+  const [deleteUserCandidate, setDeleteUserCandidate] = useState<string | null>(null);
+  const [deleteGroupCandidate, setDeleteGroupCandidate] = useState<string | null>(null);
 
-  const loadData = async () => {
-    if (!serverId) return;
+  const loadData = async (): Promise<{ users: ServerUserRow[]; groups: ServerGroupRow[] }> => {
+    if (!serverId) return { users: [], groups: [] };
     setLoading(true);
     try {
       const [usersResponse, groupsResponse] = await Promise.all([
@@ -80,8 +85,11 @@ export default function ServerUsers() {
       ]);
       const usersResult = (usersResponse.result ?? null) as TypedControlResult<ServerUserRow[]> | null;
       const groupsResult = (groupsResponse.result ?? null) as TypedControlResult<ServerGroupRow[]> | null;
-      setUsers(Array.isArray(usersResult?.data) ? usersResult.data : []);
-      setGroups(Array.isArray(groupsResult?.data) ? groupsResult.data : []);
+      const nextUsers = normalizeUsers(usersResult?.data);
+      const nextGroups = normalizeGroups(groupsResult?.data);
+      setUsers(nextUsers);
+      setGroups(nextGroups);
+      return { users: nextUsers, groups: nextGroups };
     } catch (error) {
       showNotification({
         type: "error",
@@ -91,6 +99,7 @@ export default function ServerUsers() {
     } finally {
       setLoading(false);
     }
+    return { users: [], groups: [] };
   };
 
   useEffect(() => {
@@ -129,14 +138,23 @@ export default function ServerUsers() {
 
   const submitUserAction = async () => {
     if (!serverId || !userForm.target.trim()) return;
+    if (!LINUX_ACCOUNT_NAME.test(userForm.target.trim())) {
+      showNotification({
+        type: "error",
+        message: "Invalid username",
+        description: "Use Linux-safe account names like deploy, app_user, or ops-admin.",
+      });
+      return;
+    }
     setUserActionLoading(true);
     try {
+      const target = userForm.target.trim();
       const action = userFormMode === "create" ? "add-user" : "update-user";
       await accessApi.action(serverId, {
         action,
-        target: userForm.target.trim(),
+        target,
         payload: JSON.stringify({
-          target: userForm.target.trim(),
+          target,
           rename_to: userForm.rename_to.trim(),
           home: userForm.home.trim(),
           shell: userForm.shell.trim(),
@@ -144,13 +162,18 @@ export default function ServerUsers() {
           remove_home: userForm.remove_home,
         }),
       });
+      const snapshot = await loadData();
+      const expectedUser = userForm.rename_to.trim() || target;
+      const exists = snapshot.users.some((user) => user.username === expectedUser);
+      const wasVerified = userFormMode === "edit" ? true : exists;
       showNotification({
-        type: "success",
-        message: userFormMode === "create" ? "User created" : "User updated",
-        description: `${userForm.target.trim()} has been sent to the access control workflow.`,
+        type: wasVerified ? "success" : "warning",
+        message: userFormMode === "create" ? "User workflow completed" : "User workflow updated",
+        description: wasVerified
+          ? `${expectedUser} is now visible in the latest inventory snapshot.`
+          : `${expectedUser} command succeeded, but the refreshed inventory has not reflected the change yet. Check node privileges and refresh once more.`,
       });
       resetUserForm();
-      await loadData();
     } catch (error) {
       showNotification({
         type: "error",
@@ -164,25 +187,39 @@ export default function ServerUsers() {
 
   const submitGroupAction = async () => {
     if (!serverId || !groupForm.target.trim()) return;
+    if (!LINUX_ACCOUNT_NAME.test(groupForm.target.trim())) {
+      showNotification({
+        type: "error",
+        message: "Invalid group name",
+        description: "Use Linux-safe group names like deploy, docker, or app-admin.",
+      });
+      return;
+    }
     setGroupActionLoading(true);
     try {
+      const target = groupForm.target.trim();
       const action = groupFormMode === "create" ? "add-group" : "update-group";
       await accessApi.action(serverId, {
         action,
-        target: groupForm.target.trim(),
+        target,
         payload: JSON.stringify({
-          target: groupForm.target.trim(),
+          target,
           rename_to: groupForm.rename_to.trim(),
           members: splitCsv(groupForm.members),
         }),
       });
+      const snapshot = await loadData();
+      const expectedGroup = groupForm.rename_to.trim() || target;
+      const exists = snapshot.groups.some((group) => group.name === expectedGroup);
+      const wasVerified = groupFormMode === "edit" ? true : exists;
       showNotification({
-        type: "success",
-        message: groupFormMode === "create" ? "Group created" : "Group updated",
-        description: `${groupForm.target.trim()} has been sent to the access control workflow.`,
+        type: wasVerified ? "success" : "warning",
+        message: groupFormMode === "create" ? "Group workflow completed" : "Group workflow updated",
+        description: wasVerified
+          ? `${expectedGroup} is now visible in the latest inventory snapshot.`
+          : `${expectedGroup} command succeeded, but the refreshed inventory has not reflected the change yet. Check node privileges and refresh once more.`,
       });
       resetGroupForm();
-      await loadData();
     } catch (error) {
       showNotification({
         type: "error",
@@ -195,7 +232,7 @@ export default function ServerUsers() {
   };
 
   const deleteUser = async (username: string) => {
-    if (!serverId || !window.confirm(`Delete user "${username}"?`)) return;
+    if (!serverId) return;
     setUserActionLoading(true);
     try {
       await accessApi.action(serverId, {
@@ -221,7 +258,7 @@ export default function ServerUsers() {
   };
 
   const deleteGroup = async (groupName: string) => {
-    if (!serverId || !window.confirm(`Delete group "${groupName}"?`)) return;
+    if (!serverId) return;
     setGroupActionLoading(true);
     try {
       await accessApi.action(serverId, {
@@ -391,7 +428,7 @@ export default function ServerUsers() {
                             <Pencil size={14} className="mr-1" />
                             Edit
                           </Button>
-                          <Button variant="danger" size="sm" onClick={() => void deleteUser(user.username)}>
+                          <Button variant="danger" size="sm" onClick={() => setDeleteUserCandidate(user.username)}>
                             <Trash2 size={14} className="mr-1" />
                             Delete
                           </Button>
@@ -489,7 +526,7 @@ export default function ServerUsers() {
                             <Pencil size={14} className="mr-1" />
                             Edit
                           </Button>
-                          <Button variant="danger" size="sm" onClick={() => void deleteGroup(group.name)}>
+                          <Button variant="danger" size="sm" onClick={() => setDeleteGroupCandidate(group.name)}>
                             <Trash2 size={14} className="mr-1" />
                             Delete
                           </Button>
@@ -503,6 +540,32 @@ export default function ServerUsers() {
           </div>
         </TabsContent>
       </Tabs>
+      <ConfirmActionDialog
+        open={!!deleteUserCandidate}
+        title="Delete system user?"
+        description={deleteUserCandidate ? `This removes Linux user ${deleteUserCandidate} from the node.` : ""}
+        confirmLabel="Delete User"
+        onClose={() => setDeleteUserCandidate(null)}
+        onConfirm={() => {
+          if (!deleteUserCandidate) return;
+          void deleteUser(deleteUserCandidate).finally(() => setDeleteUserCandidate(null));
+        }}
+        pending={userActionLoading}
+        tone="danger"
+      />
+      <ConfirmActionDialog
+        open={!!deleteGroupCandidate}
+        title="Delete system group?"
+        description={deleteGroupCandidate ? `This removes Linux group ${deleteGroupCandidate} from the node.` : ""}
+        confirmLabel="Delete Group"
+        onClose={() => setDeleteGroupCandidate(null)}
+        onConfirm={() => {
+          if (!deleteGroupCandidate) return;
+          void deleteGroup(deleteGroupCandidate).finally(() => setDeleteGroupCandidate(null));
+        }}
+        pending={groupActionLoading}
+        tone="danger"
+      />
     </div>
   );
 }
@@ -512,4 +575,30 @@ function splitCsv(value: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function normalizeUsers(value: unknown): ServerUserRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const row = item as Record<string, unknown>;
+    return {
+      username: String(row.username ?? ""),
+      uid: Number(row.uid ?? 0),
+      gid: Number(row.gid ?? 0),
+      home: String(row.home ?? ""),
+      shell: String(row.shell ?? ""),
+    };
+  });
+}
+
+function normalizeGroups(value: unknown): ServerGroupRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const row = item as Record<string, unknown>;
+    return {
+      name: String(row.name ?? ""),
+      gid: Number(row.gid ?? 0),
+      members: Array.isArray(row.members) ? row.members.map((member) => String(member)) : [],
+    };
+  });
 }

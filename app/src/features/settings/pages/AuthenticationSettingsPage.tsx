@@ -1,338 +1,368 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 import {
-  Shield,
-  Lock,
-  Save,
-  RefreshCw,
+  Copy,
   KeyRound,
-  Smartphone,
-  Github,
   Mail,
-  Building2,
-  CheckCircle2,
-  ChevronRight,
-  X,
+  QrCode,
+  ShieldCheck,
+  Smartphone,
 } from "lucide-react";
 import { Button } from "@/shared/ui/Button";
-import { useNotification } from "@/core/NotificationContext";
 import { Input } from "@/shared/ui/Input";
-import { cn } from "@/lib/utils";
+import { useNotification } from "@/core/NotificationContext";
+import {
+  beginMFASetup,
+  confirmMFASetup,
+  requestMFAReset,
+} from "@/features/authentication/api";
+import { getStoredSession } from "@/features/authentication/auth-session";
 
 export default function AuthenticationSettingsPage() {
   const { showNotification } = useNotification();
-  const [isSaving, setIsSaving] = useState(false);
+  const [sessionEmail, setSessionEmail] = useState("");
+  const [totpEnabled, setTotpEnabled] = useState(false);
+  const [setupToken, setSetupToken] = useState("");
+  const [secret, setSecret] = useState("");
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [otpAuthURL, setOtpAuthURL] = useState("");
+  const [qrImage, setQRImage] = useState("");
+  const [confirmCode, setConfirmCode] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Form States
-  const [settings, setSettings] = useState({
-    enableLocalAuth: true,
-    enforce2FA: false,
-    passwordExpiry: "90",
-    sessionTimeout: "24",
-  });
+  useEffect(() => {
+    const session = getStoredSession();
+    setSessionEmail(session?.user.email ?? "");
+    setTotpEnabled(!!session?.user.totp_enabled);
+  }, []);
 
-  // Mock Connected status
-  const [connectedProviders, setConnectedProviders] = useState<string[]>([
-    "google",
-  ]);
+  useEffect(() => {
+    let active = true;
+    if (!otpAuthURL) {
+      setQRImage("");
+      return;
+    }
+    void QRCode.toDataURL(otpAuthURL, {
+      margin: 1,
+      width: 320,
+      color: {
+        dark: "#0f172a",
+        light: "#f8fafc",
+      },
+    })
+      .then((dataURL) => {
+        if (active) {
+          setQRImage(dataURL);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setQRImage("");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [otpAuthURL]);
 
-  const handleToggle = (key: keyof typeof settings) => {
-    setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
+  async function handleBeginSetup() {
+    setIsLoading(true);
+    try {
+      const result = await beginMFASetup();
+      setSetupToken(result.setup_token);
+      setSecret(result.secret);
+      setRecoveryCodes(result.recovery_codes);
+      setOtpAuthURL(result.otpauth_url);
+      setConfirmCode("");
+    } catch (err) {
+      showNotification({
+        type: "error",
+        message: "Unable to start MFA setup",
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSettings((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-  };
-
-  const toggleProvider = (providerId: string) => {
-    setConnectedProviders((prev) =>
-      prev.includes(providerId)
-        ? prev.filter((p) => p !== providerId)
-        : [...prev, providerId],
-    );
-  };
-
-  const handleSave = () => {
-    setIsSaving(true);
-    setTimeout(() => {
-      setIsSaving(false);
+  async function handleConfirmSetup() {
+    setIsLoading(true);
+    try {
+      await confirmMFASetup(setupToken, confirmCode);
+      setTotpEnabled(true);
       showNotification({
         type: "success",
-        message: "Authentication secure",
-        description:
-          "Your security constraints and identity providers have been updated.",
+        message: "Authenticator enabled",
+        description: "TOTP is now active for this account.",
       });
-    }, 800);
-  };
+    } catch (err) {
+      showNotification({
+        type: "error",
+        message: "Unable to confirm MFA",
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleResetRequest() {
+    setIsLoading(true);
+    try {
+      const result = await requestMFAReset(sessionEmail);
+      showNotification({
+        type: "success",
+        message: "Reset mail sent",
+        description: result.message,
+      });
+    } catch (err) {
+      showNotification({
+        type: "error",
+        message: "Unable to send reset mail",
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function copyText(label: string, value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      showNotification({
+        type: "success",
+        message: `${label} copied`,
+        description: "Saved to clipboard for quick paste.",
+      });
+    } catch {
+      showNotification({
+        type: "error",
+        message: "Copy failed",
+        description: `Unable to copy ${label.toLowerCase()}.`,
+      });
+    }
+  }
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-20">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-5">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 flex items-center gap-2">
-            <Lock className="h-6 w-6 text-indigo-500" />
-            Authentication
-          </h1>
-          <p className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-1.5">
-            Manage identity providers, session security, and multi-factor
-            authentication.
-          </p>
-        </div>
-        <Button
-          variant="primary"
-          size="md"
-          onClick={handleSave}
-          disabled={isSaving}
-          className="min-w-30"
-        >
-          {isSaving ? (
-            <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <Save className="w-4 h-4 mr-2" />
-          )}
-          {isSaving ? "Saving..." : "Save Changes"}
-        </Button>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Main Content */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* SSO Providers */}
-          <div className="bg-white dark:bg-[#121212] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-zinc-100 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-900/20">
-              <h2 className="text-[15px] font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
-                <Shield className="w-4 h-4 text-zinc-500" />
-                Single Sign-On (SSO)
-              </h2>
+    <div className="space-y-6 pb-12">
+      <section className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 p-8 text-white shadow-sm">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="max-w-2xl">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-cyan-200">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Account Security
             </div>
-            <div className="p-6 space-y-4">
-              <ProviderCard
-                id="google"
-                name="Google Workspace"
-                description="Allow users to sign in with their corporate Google accounts."
-                icon={<Mail className="w-5 h-5" />}
-                connected={connectedProviders.includes("google")}
-                onToggle={() => toggleProvider("google")}
-              />
-              <ProviderCard
-                id="github"
-                name="GitHub"
-                description="Authenticate using GitHub organization member IDs."
-                icon={<Github className="w-5 h-5" />}
-                connected={connectedProviders.includes("github")}
-                onToggle={() => toggleProvider("github")}
-              />
-              <ProviderCard
-                id="microsoft"
-                name="Microsoft Entra"
-                description="Connect to Azure AD and sync enterprise active directories."
-                icon={<Building2 className="w-5 h-5" />}
-                connected={connectedProviders.includes("microsoft")}
-                onToggle={() => toggleProvider("microsoft")}
-              />
-            </div>
-          </div>
-
-          {/* Local Auth Settings */}
-          <div className="bg-white dark:bg-[#121212] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-zinc-100 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-900/20">
-              <h2 className="text-[15px] font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
-                <KeyRound className="w-4 h-4 text-zinc-500" />
-                Local Authentication
-              </h2>
-            </div>
-            <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              <ToggleRow
-                title="Enable Local Authentication"
-                description="Allow users to log in with a username and password natively on EINFRA."
-                active={settings.enableLocalAuth}
-                onClick={() => handleToggle("enableLocalAuth")}
-              />
-              <ToggleRow
-                title="Enforce Multi-Factor Auth (MFA)"
-                description="Require all users to configure a Time-based One-Time Password (TOTP) authenticator."
-                active={settings.enforce2FA}
-                onClick={() => handleToggle("enforce2FA")}
-              />
-            </div>
-            <div className="p-6 border-t border-zinc-100 dark:border-zinc-800 flex flex-col sm:flex-row gap-6 bg-zinc-50/30 dark:bg-[#121212]">
-              <div className="flex-1 space-y-1.5">
-                <label className="text-[13px] font-medium text-zinc-700 dark:text-zinc-300">
-                  Password Expiry (Days)
-                </label>
-                <Input
-                  name="passwordExpiry"
-                  value={settings.passwordExpiry}
-                  onChange={handleChange}
-                  type="number"
-                  className="h-10 text-[13px] w-full"
-                  disabled={!settings.enableLocalAuth}
-                />
-              </div>
-              <div className="flex-1 space-y-1.5">
-                <label className="text-[13px] font-medium text-zinc-700 dark:text-zinc-300">
-                  Global Session Timeout (Hours)
-                </label>
-                <Input
-                  name="sessionTimeout"
-                  value={settings.sessionTimeout}
-                  onChange={handleChange}
-                  type="number"
-                  className="h-10 text-[13px] w-full"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Sidebar Setup Guide */}
-        <div className="space-y-6">
-          <div className="bg-white dark:bg-[#121212] border border-zinc-200 dark:border-zinc-800 rounded-xl p-6 shadow-sm">
-            <div className="w-10 h-10 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mb-4">
-              <Smartphone className="w-5 h-5 text-zinc-600 dark:text-zinc-400" />
-            </div>
-            <h3 className="text-[15px] font-semibold text-zinc-900 dark:text-white mb-2">
-              Authenticator Apps
-            </h3>
-            <p className="text-[13px] text-zinc-500 dark:text-zinc-400 leading-relaxed mb-6">
-              If MFA is heavily enforced, users will be required prompted to
-              pair apps like Google Authenticator or Microsoft Authenticator
-              upon their next login attempt.
+            <h1 className="text-3xl font-semibold tracking-tight">
+              Authenticator and recovery controls
+            </h1>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              Scan a real QR code with Google or Microsoft Authenticator, then keep the recovery codes safe for incident response.
             </p>
-            <Button variant="outline" className="w-full text-[13px]">
-              View MFA Recovery Guide
+          </div>
+          <div className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 backdrop-blur">
+            <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
+              Current state
+            </div>
+            <div className="mt-2 text-lg font-semibold text-white">
+              {totpEnabled ? "MFA Enabled" : "MFA Not Enabled"}
+            </div>
+            <div className="mt-1 text-sm text-slate-300">{sessionEmail || "No session email"}</div>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <section className="rounded-[2rem] border border-zinc-200 bg-white p-8 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700">
+              <Smartphone className="h-6 w-6" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-zinc-950">
+                TOTP authenticator setup
+              </h2>
+              <p className="text-sm text-zinc-500">
+                Scan the QR below, then confirm with the 6-digit code from your app.
+              </p>
+            </div>
+          </div>
+
+          {!setupToken ? (
+            <div className="mt-8 rounded-3xl border border-dashed border-zinc-300 bg-zinc-50 px-6 py-10 text-center">
+              <QrCode className="mx-auto h-10 w-10 text-zinc-400" />
+              <h3 className="mt-4 text-base font-semibold text-zinc-900">
+                Generate a fresh MFA enrollment
+              </h3>
+              <p className="mx-auto mt-2 max-w-lg text-sm text-zinc-500">
+                This creates a temporary setup token, shared secret and recovery codes for the current signed-in account.
+              </p>
+              <Button className="mt-5" onClick={handleBeginSetup} isLoading={isLoading}>
+                Begin MFA Setup
+              </Button>
+            </div>
+          ) : (
+            <div className="mt-8 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+              <div className="rounded-3xl border border-zinc-200 bg-slate-50 p-5">
+                <div className="rounded-[1.5rem] bg-white p-4 shadow-sm">
+                  {qrImage ? (
+                    <img
+                      src={qrImage}
+                      alt="Authenticator QR code"
+                      className="mx-auto w-full max-w-72 rounded-2xl"
+                    />
+                  ) : (
+                    <div className="flex h-72 items-center justify-center rounded-2xl border border-dashed border-zinc-300 text-sm text-zinc-500">
+                      Preparing QR code...
+                    </div>
+                  )}
+                </div>
+                <div className="mt-4 text-center text-sm text-zinc-600">
+                  Scan this code in Google Authenticator or Microsoft Authenticator.
+                </div>
+              </div>
+
+              <div className="space-y-5">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {[
+                    { step: "01", label: "Scan QR", detail: "Open Google or Microsoft Authenticator." },
+                    { step: "02", label: "Store codes", detail: "Save recovery codes in a secure vault." },
+                    { step: "03", label: "Confirm", detail: "Enter the 6-digit code to activate MFA." },
+                  ].map((item) => (
+                    <div key={item.step} className="rounded-3xl border border-zinc-200 bg-white px-4 py-4 shadow-sm">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">{item.step}</div>
+                      <div className="mt-2 text-sm font-semibold text-zinc-950">{item.label}</div>
+                      <div className="mt-1 text-xs leading-5 text-zinc-500">{item.detail}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-zinc-950">Manual setup secret</div>
+                      <div className="text-xs text-zinc-500">
+                        Use this only if camera scanning is unavailable.
+                      </div>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => void copyText("Secret", secret)}>
+                      <Copy className="mr-2 h-3.5 w-3.5" />
+                      Copy
+                    </Button>
+                  </div>
+                  <div className="mt-3 rounded-2xl bg-white px-4 py-3 font-mono text-sm tracking-[0.2em] text-zinc-900 shadow-sm">
+                    {secret}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-zinc-950">Recovery codes</div>
+                      <div className="text-xs text-zinc-500">
+                        Each code works once when your authenticator is unavailable.
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void copyText("Recovery codes", recoveryCodes.join("\n"))}
+                    >
+                      <Copy className="mr-2 h-3.5 w-3.5" />
+                      Copy All
+                    </Button>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {recoveryCodes.map((code) => (
+                      <code
+                        key={code}
+                        className="rounded-2xl bg-white px-3 py-2 text-center text-sm text-zinc-800 shadow-sm"
+                      >
+                        {code}
+                      </code>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-zinc-200 bg-white p-5">
+                  <label className="text-sm font-medium text-zinc-900">
+                    Confirm setup code
+                  </label>
+                  <Input
+                    value={confirmCode}
+                    onChange={(event) => setConfirmCode(event.target.value)}
+                    placeholder="Enter the 6-digit code from your authenticator"
+                    className="mt-2"
+                  />
+                  <Button
+                    className="mt-4"
+                    onClick={handleConfirmSetup}
+                    isLoading={isLoading}
+                    disabled={confirmCode.trim().length < 6}
+                  >
+                    Confirm MFA
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="space-y-6 rounded-[2rem] border border-zinc-200 bg-white p-8 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
+              <Mail className="h-6 w-6" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-zinc-950">
+                Recovery workflow
+              </h2>
+              <p className="text-sm text-zinc-500">
+                Reset notifications go to the mailbox attached to this account.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5">
+            <label className="text-sm font-medium text-zinc-900">Account email</label>
+            <Input
+              value={sessionEmail}
+              onChange={(event) => setSessionEmail(event.target.value)}
+              placeholder="Account email"
+              className="mt-2"
+            />
+            <Button
+              className="mt-4"
+              onClick={handleResetRequest}
+              isLoading={isLoading}
+              disabled={!sessionEmail.trim()}
+            >
+              Send Authenticator Reset Mail
             </Button>
           </div>
 
-          <div className="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-xl p-5">
-            <div className="flex items-center gap-2 mb-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <h3 className="text-[14px] font-semibold text-emerald-900 dark:text-emerald-300">
-                Security Score: A+
-              </h3>
+          <div className="rounded-3xl border border-zinc-200 bg-slate-50 p-5">
+            <div className="flex items-center gap-2 text-sm font-semibold text-zinc-950">
+              <KeyRound className="h-4 w-4" />
+              What this security flow covers
             </div>
-            <p className="text-[12px] text-emerald-800/80 dark:text-emerald-300/80">
-              Your platform currently meets enterprise security compliance for
-              authentication. Keep session timeouts fairly restricted.
-            </p>
+            <ul className="mt-3 space-y-2 text-sm text-zinc-600">
+              <li>Password reset email with one-time token</li>
+              <li>Authenticator reset email with one-time token</li>
+              <li>New login notification after successful sign-in</li>
+              <li>Recovery codes for offline account regain</li>
+            </ul>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-function ProviderCard({
-  name,
-  description,
-  icon,
-  connected,
-  onToggle,
-}: {
-  name: string;
-  description: string;
-  icon: React.ReactNode;
-  id: string;
-  connected: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex items-center justify-between p-4 rounded-xl border transition-all duration-200",
-        connected
-          ? "bg-zinc-50 border-zinc-200 dark:bg-zinc-800/50 dark:border-zinc-700/50"
-          : "bg-white border-zinc-100 dark:bg-[#121212] dark:border-zinc-800",
-      )}
-    >
-      <div className="flex items-center gap-4">
-        <div
-          className={cn(
-            "w-10 h-10 rounded-lg flex items-center justify-center",
-            connected
-              ? "bg-white text-zinc-900 dark:bg-zinc-800 dark:text-white shadow-sm"
-              : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900/50 dark:text-zinc-400",
-          )}
-        >
-          {icon}
-        </div>
-        <div>
-          <h3 className="text-[14px] font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
-            {name}
-            {connected && (
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400">
-                Connected
-              </span>
-            )}
-          </h3>
-          <p className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-0.5 max-w-70">
-            {description}
-          </p>
-        </div>
+          <div className="rounded-3xl border border-cyan-200 bg-cyan-50 p-5">
+            <div className="text-sm font-semibold text-cyan-950">Operator note</div>
+            <div className="mt-2 text-sm leading-6 text-cyan-900">
+              MFA setup is generated from the live backend session. If you rotate authenticator apps, request a reset first instead of regenerating secrets in place.
+            </div>
+          </div>
+        </section>
       </div>
-
-      <div className="flex items-center gap-3">
-        {connected ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onToggle}
-            className="h-8 text-[12px] border-zinc-200 dark:border-zinc-700 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10"
-          >
-            <X className="w-3.5 h-3.5 mr-1" /> Disconnect
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onToggle}
-            className="h-8 text-[12px] bg-white dark:bg-zinc-900"
-          >
-            Configure <ChevronRight className="w-3.5 h-3.5 ml-1" />
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ToggleRow({
-  title,
-  description,
-  active,
-  onClick,
-}: {
-  title: string;
-  description: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <div className="p-6 flex items-start justify-between gap-8 group">
-      <div className="flex-1">
-        <h3 className="text-[14px] font-semibold text-zinc-900 dark:text-white mb-1.5">
-          {title}
-        </h3>
-        <p className="text-[13px] text-zinc-500 dark:text-zinc-400 leading-relaxed max-w-xl">
-          {description}
-        </p>
-      </div>
-      <button
-        onClick={onClick}
-        className={cn(
-          "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
-          active ? "bg-indigo-600" : "bg-zinc-200 dark:bg-zinc-700",
-        )}
-      >
-        <span
-          className={cn(
-            "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
-            active ? "translate-x-4" : "translate-x-0",
-          )}
-        />
-      </button>
     </div>
   );
 }

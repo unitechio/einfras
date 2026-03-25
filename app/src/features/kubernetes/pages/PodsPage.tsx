@@ -7,7 +7,9 @@ import {
     Cuboid, MousePointer2, ChevronRight, HardDrive,
     Server, ShieldCheck, Database, LayoutGrid, Globe
 } from "lucide-react";
-import { useClusters, usePods } from "../api/useKubernetesHooks";
+import { useClusters, useLivePods, useNamespaces, usePods } from "../api/useKubernetesHooks";
+import { useEnvironment } from "@/core/EnvironmentContext";
+import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
@@ -16,9 +18,12 @@ import { Badge } from "@/shared/ui/Badge";
 import { K8sExplorerLayout } from "../components/K8sExplorerLayout";
 import { K8sStatusBadge } from "../components/K8sStatusBadge";
 import { K8sResourceDetailPanel } from "../components/K8sResourceDetailPanel";
+import { openCreateResourcePage } from "../createResourceConfig";
 
 export default function PodsPage() {
     const { data: clusterData, isLoading: isLoadingClusters } = useClusters();
+    const { selectedEnvironment } = useEnvironment();
+    const navigate = useNavigate();
     const clusters = clusterData?.data || [];
     
     const [selectedClusterId, setSelectedClusterId] = useState<string>("");
@@ -26,16 +31,34 @@ export default function PodsPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedPod, setSelectedPod] = useState<any>(null);
     const [isPanelOpen, setIsPanelOpen] = useState(false);
+    const [watchEnabled, setWatchEnabled] = useState(true);
 
     useEffect(() => {
+        if (selectedEnvironment?.type === "kubernetes" && selectedEnvironment.id !== selectedClusterId) {
+            setSelectedClusterId(selectedEnvironment.id);
+            return;
+        }
         if (!selectedClusterId && clusters.length > 0) {
             setSelectedClusterId(clusters[0].id);
         }
-    }, [clusters, selectedClusterId]);
+    }, [clusters, selectedClusterId, selectedEnvironment]);
 
-    const { data: pods, isLoading: isLoadingPods, refetch } = usePods(selectedClusterId, namespace);
+    const { data: pods, isLoading: isLoadingPods, refetch } = usePods(selectedClusterId, namespace, { watch: watchEnabled });
+    const livePods = useLivePods(selectedClusterId, namespace, watchEnabled);
+    const { data: namespacesData = [] } = useNamespaces(selectedClusterId, { watch: watchEnabled });
+    const namespaces = namespacesData.map((item) => item.name);
 
-    const filteredPods = (pods || []).filter(pod => 
+    useEffect(() => {
+        if (!namespaces.length) {
+            return;
+        }
+        if (!namespaces.includes(namespace)) {
+            setNamespace(namespaces[0]);
+        }
+    }, [namespace, namespaces]);
+
+    const podItems = livePods.data ?? pods ?? [];
+    const filteredPods = podItems.filter(pod => 
         pod.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
@@ -45,16 +68,16 @@ export default function PodsPage() {
     };
 
     return (
-        <K8sExplorerLayout
-            clusters={clusters}
-            namespaces={["default", "kube-system", "monitoring", "ingress-nginx"]}
-            selectedCluster={selectedClusterId}
-            selectedNamespace={namespace}
-            onClusterChange={setSelectedClusterId}
-            onNamespaceChange={setNamespace}
-            activeResource="pods"
-            onResourceChange={(type) => console.log("Navigate to", type)}
-        >
+            <K8sExplorerLayout
+                clusters={clusters}
+                namespaces={namespaces.length ? namespaces : ["default"]}
+                selectedCluster={selectedClusterId}
+                selectedNamespace={namespace}
+                onClusterChange={setSelectedClusterId}
+                onNamespaceChange={setNamespace}
+                activeResource="pods"
+                onResourceChange={(type) => navigate(`/${type}`)}
+            >
             <div className="flex flex-col gap-6 h-full">
                 {/* Search & Actions Bar */}
                 <div className="flex flex-col sm:flex-row gap-4 items-center justify-between pb-6 border-b border-zinc-100 dark:border-zinc-800/80 sticky top-0 bg-[#fcfcfc] dark:bg-[#0a0a0a] z-[5] pt-1">
@@ -79,8 +102,22 @@ export default function PodsPage() {
                             <RefreshCw className={cn("h-4 w-4 mr-2", isLoadingPods && "animate-spin")} />
                             Refresh
                         </Button>
+                        <Button variant={watchEnabled ? "primary" : "outline"} size="md" onClick={() => setWatchEnabled((current) => !current)}>
+                            {watchEnabled ? (livePods.isConnected ? "Live" : "Watching") : "Watch"}
+                        </Button>
                         <div className="h-6 w-px bg-zinc-200 dark:bg-zinc-800 mx-1" />
-                        <Button variant="primary" size="md" className="rounded-xl shadow-lg shadow-blue-500/20 px-6 font-bold tracking-tight">
+                        <Button
+                            variant="primary"
+                            size="md"
+                            className="rounded-xl shadow-lg shadow-blue-500/20 px-6 font-bold tracking-tight"
+                            onClick={() =>
+                                openCreateResourcePage(navigate, {
+                                    resourceType: "pod",
+                                    clusterId: selectedClusterId,
+                                    namespace,
+                                })
+                            }
+                        >
                             Create Pod
                         </Button>
                     </div>
@@ -230,9 +267,13 @@ export default function PodsPage() {
             <K8sResourceDetailPanel 
                 resource={selectedPod}
                 type="pod"
+                clusterId={selectedClusterId}
                 isOpen={isPanelOpen}
                 onClose={() => setIsPanelOpen(false)}
             />
         </K8sExplorerLayout>
     );
 }
+
+
+

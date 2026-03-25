@@ -1,3 +1,6 @@
+//go:build legacy
+// +build legacy
+
 // Package middleware — rbac.go
 // Organization context + RBAC permission enforcement middleware.
 //

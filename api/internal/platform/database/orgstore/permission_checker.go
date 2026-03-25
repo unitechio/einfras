@@ -1,3 +1,6 @@
+//go:build legacy
+// +build legacy
+
 // Package orgstore — permission_checker.go
 // Redis-cached RBAC permission checker.
 // First checks Redis (TTL 60s), falls back to DB on cache miss.

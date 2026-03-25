@@ -16,7 +16,7 @@ import {
   MinusSquare,
   Search,
 } from "lucide-react";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { useServerServices, useServiceAction } from "../../../api/useServerHooks";
 import { ServiceLogDrawer } from "../monitoring/ServiceLogDrawer";
@@ -50,6 +50,7 @@ export default function ServerServices() {
     useState<any | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showWizard, setShowWizard] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Active Menu State
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -67,6 +68,14 @@ export default function ServerServices() {
     isOpen: boolean;
   } | null>(null);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const filteredServices = useMemo(() => {
+    const keyword = searchQuery.trim().toLowerCase();
+    if (!keyword) return services;
+    return services.filter((service) =>
+      [service.name, service.display_name, service.description, service.status, service.boot_status]
+        .some((value) => String(value ?? "").toLowerCase().includes(keyword)),
+    );
+  }, [services, searchQuery]);
 
   const handleAction = async (
     action: "start" | "stop" | "restart" | "reload" | "enable" | "disable",
@@ -144,10 +153,10 @@ export default function ServerServices() {
 
   // Selection Logic
   const toggleSelectAll = () => {
-    if (selectedServices.size === services.length) {
+    if (selectedServices.size === filteredServices.length) {
       setSelectedServices(new Set());
     } else {
-      setSelectedServices(new Set(services.map((s) => s.name)));
+      setSelectedServices(new Set(filteredServices.map((s) => s.name)));
     }
   };
 
@@ -162,9 +171,9 @@ export default function ServerServices() {
   };
 
   const isAllSelected =
-    services.length > 0 && selectedServices.size === services.length;
+    filteredServices.length > 0 && selectedServices.size === filteredServices.length;
   const isIndeterminate =
-    selectedServices.size > 0 && selectedServices.size < services.length;
+    selectedServices.size > 0 && selectedServices.size < filteredServices.length;
 
   return (
     <div className="space-y-6 relative pb-20 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -235,6 +244,17 @@ export default function ServerServices() {
       </div>
 
       <div className="bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-zinc-800/60 rounded-xl shadow-sm overflow-hidden transition-all">
+        <div className="border-b border-zinc-200/60 p-4 dark:border-zinc-800/60">
+          <div className="relative max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={15} />
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search service name, status, boot mode, description..."
+              className="h-10 w-full rounded-lg border border-zinc-200 bg-white pl-10 pr-3 text-sm text-zinc-900 outline-none focus:border-blue-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+            />
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -287,7 +307,7 @@ export default function ServerServices() {
                       </TableCell>
                     </TableRow>
                   ))
-                : services.map((service) => (
+                : filteredServices.map((service) => (
                     <TableRow
                       key={service.name}
                       onClick={(e) => {
@@ -510,6 +530,13 @@ export default function ServerServices() {
                       </TableCell>
                     </TableRow>
                   ))}
+              {!isLoading && filteredServices.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-10 text-center text-sm text-zinc-500">
+                    {services.length === 0 ? "No services discovered yet. Use Discover after package install." : "No services match your search."}
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </div>

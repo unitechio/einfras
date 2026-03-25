@@ -13,6 +13,7 @@ import (
 
 type ResourcesHandler struct {
 	services      *managementapp.ServiceManager
+	installPlans  *managementapp.ServiceInstallPlanManager
 	networks      *managementapp.NetworkManager
 	firewall      *managementapp.FirewallManager
 	backups       *managementapp.BackupManager
@@ -24,6 +25,7 @@ type ResourcesHandler struct {
 
 func NewResourcesHandler(
 	services *managementapp.ServiceManager,
+	installPlans *managementapp.ServiceInstallPlanManager,
 	networks *managementapp.NetworkManager,
 	firewall *managementapp.FirewallManager,
 	backups *managementapp.BackupManager,
@@ -34,6 +36,7 @@ func NewResourcesHandler(
 ) *ResourcesHandler {
 	return &ResourcesHandler{
 		services:      services,
+		installPlans:  installPlans,
 		networks:      networks,
 		firewall:      firewall,
 		backups:       backups,
@@ -46,6 +49,8 @@ func NewResourcesHandler(
 
 func (h *ResourcesHandler) Register(r *mux.Router) {
 	r.HandleFunc("/v1/servers/{id}/services", h.listServices).Methods(http.MethodGet)
+	r.HandleFunc("/v1/servers/{id}/service-install-plans", h.listServiceInstallPlans).Methods(http.MethodGet)
+	r.HandleFunc("/v1/servers/{id}/service-install-plans", h.createServiceInstallPlan).Methods(http.MethodPost)
 	r.HandleFunc("/v1/servers/{id}/services/{service}", h.getService).Methods(http.MethodGet)
 	r.HandleFunc("/v1/servers/{id}/services/{service}/logs", h.serviceLogs).Methods(http.MethodPost)
 	r.HandleFunc("/v1/servers/{id}/network/interfaces", h.listInterfaces).Methods(http.MethodGet)
@@ -93,6 +98,44 @@ func (h *ResourcesHandler) Register(r *mux.Router) {
 	r.HandleFunc("/v1/servers/{id}/access/actions", h.accessAction).Methods(http.MethodPost)
 	r.HandleFunc("/v1/servers/{id}/config/actions", h.configAction).Methods(http.MethodPost)
 	r.HandleFunc("/v1/servers/{id}/plugins/actions", h.pluginAction).Methods(http.MethodPost)
+}
+
+type createServiceInstallPlanRequest struct {
+	Mode         string `json:"mode"`
+	PackageName  string `json:"package_name"`
+	ArtifactName string `json:"artifact_name"`
+	RelayHost    string `json:"relay_host"`
+	Notes        string `json:"notes"`
+}
+
+func (h *ResourcesHandler) listServiceInstallPlans(w http.ResponseWriter, r *http.Request) {
+	items, err := h.installPlans.List(r.Context(), mux.Vars(r)["id"])
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, listEnvelope("ok", "service_install_plan", items, nil))
+}
+
+func (h *ResourcesHandler) createServiceInstallPlan(w http.ResponseWriter, r *http.Request) {
+	var request createServiceInstallPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	item := &domain.ServerServiceInstallPlan{
+		ServerID:     mux.Vars(r)["id"],
+		Mode:         domain.ServiceInstallPlanMode(request.Mode),
+		PackageName:  request.PackageName,
+		ArtifactName: request.ArtifactName,
+		RelayHost:    request.RelayHost,
+		Notes:        request.Notes,
+	}
+	if err := h.installPlans.Create(r.Context(), item); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, itemEnvelope("created", "service_install_plan", item, nil))
 }
 
 func (h *ResourcesHandler) listServices(w http.ResponseWriter, r *http.Request) {

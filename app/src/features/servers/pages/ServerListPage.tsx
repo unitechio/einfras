@@ -184,12 +184,20 @@ function QuickActionLink({
 export default function ServerListPage() {
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [statusFilters, setStatusFilters] = useState<string[]>([]);
   const [platformFilters, setPlatformFilters] = useState<string[]>([]);
   const [connectionFilters, setConnectionFilters] = useState<string[]>([]);
   const [tagFilters, setTagFilters] = useState<string[]>([]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm.trim());
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [searchTerm]);
 
   const {
     data,
@@ -200,14 +208,14 @@ export default function ServerListPage() {
   } = useServers({
     page,
     page_size: pageSize,
-    search: searchTerm
+    search: debouncedSearchTerm
   });
 
   const servers = data?.data || [];
 
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, pageSize, statusFilters, platformFilters, connectionFilters, tagFilters]);
+  }, [debouncedSearchTerm, pageSize, statusFilters, platformFilters, connectionFilters, tagFilters]);
 
   const filteredServers = servers.filter((server) => {
     const matchesStatus =
@@ -233,6 +241,9 @@ export default function ServerListPage() {
 
   const activeFilterCount =
     statusFilters.length + platformFilters.length + connectionFilters.length + tagFilters.length;
+  const totalVisible = activeFilterCount > 0 ? filteredServers.length : (data?.total ?? filteredServers.length);
+  const visibleStart = filteredServers.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const visibleEnd = filteredServers.length === 0 ? 0 : visibleStart + filteredServers.length - 1;
 
   const handleRefresh = () => {
     refetch();
@@ -284,7 +295,7 @@ export default function ServerListPage() {
     );
   }
 
-  if (filteredServers.length === 0 && !searchTerm && activeFilterCount === 0) {
+  if (filteredServers.length === 0 && !debouncedSearchTerm && activeFilterCount === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[500px] gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
         <div className="relative">
@@ -336,7 +347,7 @@ export default function ServerListPage() {
             />
             <input
               type="text"
-              placeholder="Search environments..."
+              placeholder="Search by name, IP, hostname, tag..."
               className="bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-sm cursor-pointer  pl-10 pr-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white dark:focus:bg-zinc-900 transition-all w-64 md:w-72"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -349,7 +360,7 @@ export default function ServerListPage() {
             className="bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-sm cursor-pointer  text-xs font-bold flex items-center gap-2 transition-all border border-zinc-200 dark:border-zinc-700 shadow-sm disabled:opacity-50"
           >
             <RefreshCw size={14} className={cn(isRefetching && "animate-spin")} />
-            <span>{isRefetching ? "Syncing..." : "Sync"}</span>
+            <span>{isRefetching ? "Syncing..." : debouncedSearchTerm !== searchTerm.trim() ? "Searching..." : "Sync"}</span>
           </button>
 
           <Link to="/servers/add">
@@ -752,9 +763,9 @@ export default function ServerListPage() {
         <div className="text-xs text-zinc-500 font-medium">
           Showing{" "}
           <span className="text-zinc-900 dark:text-white font-bold">
-            {filteredServers.length === 0 ? 0 : (page - 1) * pageSize + 1}-{Math.min(page * pageSize, filteredServers.length)}
+            {visibleStart}-{visibleEnd}
           </span>{" "}
-          of {filteredServers.length}
+          of {totalVisible}
         </div>
         <div className="flex gap-1">
           <button 
@@ -779,7 +790,8 @@ export default function ServerListPage() {
 
 function formatHardwareChip(value: number | undefined, suffix: string) {
   if (typeof value === "number" && value > 0) {
-    return `${value} ${suffix}`;
+    const normalized = Number.isInteger(value) ? value.toString() : value.toFixed(1);
+    return `${normalized} ${suffix}`.trim();
   }
-  return "syncing";
+  return "pending sync";
 }

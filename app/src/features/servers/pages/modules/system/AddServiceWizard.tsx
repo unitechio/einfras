@@ -53,6 +53,10 @@ export function AddServiceWizard({
   const [installing, setInstalling] = useState(false);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [resultMessage, setResultMessage] = useState<string>("");
+  const [privateArtifact, setPrivateArtifact] = useState("");
+  const [relayPackage, setRelayPackage] = useState("");
+  const [relayHost, setRelayHost] = useState("");
+  const [savingPlan, setSavingPlan] = useState(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -63,6 +67,9 @@ export function AddServiceWizard({
         setSelectedPackage("");
         setPackageResults([]);
         setResultMessage("");
+        setPrivateArtifact("");
+        setRelayPackage("");
+        setRelayHost("");
       }, 200);
     }
   }, [isOpen]);
@@ -128,6 +135,10 @@ export function AddServiceWizard({
   }, [isOpen, step, mode, query, serverId]);
 
   const canInstallPublic = mode === "public" && selectedPackage.trim().length > 0;
+  const canContinueReview =
+    (mode === "public" && canInstallPublic) ||
+    (mode === "private" && privateArtifact.trim().length > 0) ||
+    (mode === "relay" && relayPackage.trim().length > 0 && relayHost.trim().length > 0);
   const guidance = useMemo(() => {
     if (mode === "private") {
       return {
@@ -189,6 +200,47 @@ export function AddServiceWizard({
       });
     } finally {
       setInstalling(false);
+    }
+  };
+
+  const handlePlanSave = async (planMode: "private" | "relay") => {
+    if (!serverId) return;
+    setSavingPlan(true);
+    setStep("result");
+    try {
+      const plan = await servicesApi.createInstallPlan(serverId, {
+        mode: planMode,
+        artifact_name: planMode === "private" ? privateArtifact.trim() : undefined,
+        package_name: planMode === "relay" ? relayPackage.trim() : undefined,
+        relay_host: planMode === "relay" ? relayHost.trim() : undefined,
+        notes:
+          planMode === "private"
+            ? "Plan captured from Add Service wizard for private artifact installation."
+            : "Plan captured from Add Service wizard for relay/bastion installation.",
+      });
+
+      const summary =
+        planMode === "private"
+          ? `Private install plan saved for artifact "${privateArtifact.trim()}". Plan ID: ${plan.id}. Upload execution pipeline still needs the dedicated backend endpoint, but the intent is now persisted on the control plane.`
+          : `Relay install plan saved for package "${relayPackage.trim()}" via "${relayHost.trim()}". Plan ID: ${plan.id}. Relay orchestration is not yet executable end-to-end, but the workflow is now tracked by the backend.`;
+
+      setResultMessage(summary);
+      showNotification({
+        type: "success",
+        message: planMode === "private" ? "Upload plan saved" : "Relay plan saved",
+        description: `Plan ${plan.id} has been recorded on the backend.`,
+      });
+      await onInstalled?.();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to save install plan.";
+      setResultMessage(message);
+      showNotification({
+        type: "error",
+        message: planMode === "private" ? "Unable to save upload plan" : "Unable to save relay plan",
+        description: message,
+      });
+    } finally {
+      setSavingPlan(false);
     }
   };
 
@@ -366,6 +418,47 @@ export function AddServiceWizard({
                       <p key={line}>{line}</p>
                     ))}
                   </div>
+                  {mode === "private" ? (
+                    <div className="mt-5 grid gap-4 md:grid-cols-2">
+                      <div>
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                          Artifact name
+                        </div>
+                        <Input
+                          value={privateArtifact}
+                          onChange={(event) => setPrivateArtifact(event.target.value)}
+                          placeholder="nginx_1.24.0_amd64.deb"
+                        />
+                      </div>
+                      <div className="rounded-xl border border-dashed border-purple-200/60 bg-purple-50/60 p-4 text-xs text-purple-700 dark:border-purple-800/50 dark:bg-purple-900/10 dark:text-purple-300">
+                        Upload API is not live yet. This step now captures the install intent clearly so the UI no longer looks like it completed a real upload.
+                      </div>
+                    </div>
+                  ) : null}
+                  {mode === "relay" ? (
+                    <div className="mt-5 grid gap-4 md:grid-cols-2">
+                      <div>
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                          Relay / bastion host
+                        </div>
+                        <Input
+                          value={relayHost}
+                          onChange={(event) => setRelayHost(event.target.value)}
+                          placeholder="bastion.internal"
+                        />
+                      </div>
+                      <div>
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                          Package to install
+                        </div>
+                        <Input
+                          value={relayPackage}
+                          onChange={(event) => setRelayPackage(event.target.value)}
+                          placeholder="nginx"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -381,6 +474,16 @@ export function AddServiceWizard({
                   <div className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">Installing service package</div>
                   <div className="mt-3 max-w-xl text-sm text-zinc-500 dark:text-zinc-400">
                     We are dispatching the package install command and syncing service discovery. This can take a little longer on fresh nodes.
+                  </div>
+                </>
+              ) : savingPlan ? (
+                <>
+                  <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-purple-100 text-purple-600 dark:bg-purple-900/20 dark:text-purple-300">
+                    <Loader2 size={34} className="animate-spin" />
+                  </div>
+                  <div className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">Saving installation plan</div>
+                  <div className="mt-3 max-w-xl text-sm text-zinc-500 dark:text-zinc-400">
+                    We are recording this private or relay workflow on the control plane so the install intent is traceable instead of only living in the browser.
                   </div>
                 </>
               ) : (
@@ -415,11 +518,15 @@ export function AddServiceWizard({
             </Button>
             <Button
               variant="primary"
-              disabled={(step === "package" && !canInstallPublic) || installing}
+              disabled={((step === "package" || step === "review") && !canContinueReview) || installing || savingPlan}
               onClick={() => {
                 if (step === "package") setStep("review");
                 else if (step === "review" && mode === "public") {
                   void handlePublicInstall();
+                } else if (step === "review" && mode === "private") {
+                  void handlePlanSave("private");
+                } else if (step === "review" && mode === "relay") {
+                  void handlePlanSave("relay");
                 } else if (step === "review") {
                   onClose();
                 }
@@ -429,6 +536,14 @@ export function AddServiceWizard({
                 mode === "public" ? (
                   <>
                     Install package <ArrowRight size={16} className="ml-2" />
+                  </>
+                ) : mode === "private" ? (
+                  <>
+                    Save Upload Plan <ArrowRight size={16} className="ml-2" />
+                  </>
+                ) : mode === "relay" ? (
+                  <>
+                    Save Relay Plan <ArrowRight size={16} className="ml-2" />
                   </>
                 ) : (
                   "Close guide"
@@ -442,7 +557,7 @@ export function AddServiceWizard({
           </div>
         ) : (
           <div className="flex justify-end border-t border-zinc-200/70 bg-zinc-50/80 px-6 py-4 dark:border-zinc-800/70 dark:bg-zinc-800/15">
-            <Button variant="primary" onClick={onClose} disabled={installing}>
+            <Button variant="primary" onClick={onClose} disabled={installing || savingPlan}>
               Done
             </Button>
           </div>

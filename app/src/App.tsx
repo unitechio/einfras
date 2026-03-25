@@ -9,6 +9,13 @@ import Layout from "@/components/Layout";
 import Topbar from "@/components/Topbar";
 import LoadingPage from "@/pages/LoadingPage";
 import { LoginPage } from "@/features/authentication";
+import {
+  clearSession,
+  getStoredSession,
+  saveSession,
+  type AuthSession,
+} from "@/features/authentication/auth-session";
+import { fetchMe } from "@/features/authentication/api";
 import AppRoutes from "@/routes/AppRoutes";
 
 function AppContent() {
@@ -16,37 +23,70 @@ function AppContent() {
   const isPublicRoute = location.pathname === "/diagram";
 
   const [isAppLoading, setIsAppLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthTransitioning, setIsAuthTransitioning] = useState(false);
+  const [session, setSession] = useState<AuthSession | null>(null);
   const { showNotification } = useNotification();
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsAppLoading(false);
-    }, 2000);
-    return () => clearTimeout(timer);
+    let cancelled = false;
+
+    async function bootstrap() {
+      const current = getStoredSession();
+      if (!current) {
+        if (!cancelled) {
+          setIsAppLoading(false);
+        }
+        return;
+      }
+      try {
+        const me = await fetchMe(current.accessToken);
+        if (!cancelled && me.user && me.principal) {
+          const nextSession: AuthSession = {
+            ...current,
+            user: me.user,
+            principal: me.principal,
+            organizations: me.organizations ?? current.organizations,
+          };
+          saveSession(nextSession);
+          setSession(nextSession);
+        }
+      } catch {
+        clearSession();
+      } finally {
+        if (!cancelled) {
+          setIsAppLoading(false);
+        }
+      }
+    }
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handleLogin = () => {
-    setIsAuthenticated(true);
-    setTimeout(() => {
-      showNotification({
-        type: "success",
-        message: "Welcome back, Admin!",
-        description:
-          "You have successfully connected to the EINFRA secure cluster.",
-      });
-    }, 100);
+  const handleLogin = async (nextSession: AuthSession) => {
+    setIsAuthTransitioning(true);
+    setSession(nextSession);
+    await new Promise((resolve) => window.setTimeout(resolve, 1200));
+    showNotification({
+      type: "success",
+      message: "Welcome back",
+      description: `You are connected to ${nextSession.organizations[0]?.name ?? "your"} workspace.`,
+    });
+    setIsAuthTransitioning(false);
   };
 
   const handleLogout = () => {
-    setIsAuthenticated(false);
+    clearSession();
+    setSession(null);
   };
 
-  if (isAppLoading && !isPublicRoute) {
+  if ((isAppLoading || isAuthTransitioning) && !isPublicRoute) {
     return <LoadingPage />;
   }
 
-  if (!isAuthenticated && !isPublicRoute) {
+  if (!session && !isPublicRoute) {
     return <LoginPage onLogin={handleLogin} />;
   }
 

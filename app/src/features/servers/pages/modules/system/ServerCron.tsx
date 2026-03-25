@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/Switch";
 import { cn } from "@/lib/utils";
 import { Link, useParams } from "react-router-dom";
 import { Button } from "@/shared/ui/Button";
+import { ConfirmActionDialog } from "@/shared/ui/ConfirmActionDialog";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/shared/ui/Table";
 import { useServerCron, useDeleteCronJob, useUpdateCronJob, useExecuteCronJob, useCronHistory } from "../../../api/useServerHooks";
 import { useQueryClient } from "@tanstack/react-query";
@@ -27,6 +28,7 @@ export default function ServerCron() {
   const jobs = jobsData || [];
   const [runningJobs, setRunningJobs] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
+  const [deleteCandidate, setDeleteCandidate] = useState<string | null>(null);
 
   // Drawer State
   const [selectedJobIdForLogs, setSelectedJobIdForLogs] = useState<string | null>(null);
@@ -59,21 +61,19 @@ export default function ServerCron() {
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm("Are you sure you want to delete this cron job?")) {
-      try {
-        await deleteJob(id);
-        showNotification({
-          type: "success",
-          message: "Job deleted",
-          description: "The scheduled job was removed.",
-        });
-      } catch (error) {
-        showNotification({
-          type: "error",
-          message: "Failed to delete job",
-          description: error instanceof Error ? error.message : "Request failed.",
-        });
-      }
+    try {
+      await deleteJob(id);
+      showNotification({
+        type: "success",
+        message: "Job deleted",
+        description: "The scheduled job was removed.",
+      });
+    } catch (error) {
+      showNotification({
+        type: "error",
+        message: "Failed to delete job",
+        description: error instanceof Error ? error.message : "Request failed.",
+      });
     }
   };
 
@@ -270,7 +270,7 @@ export default function ServerCron() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => handleDelete(job.id)}
+                        onClick={() => setDeleteCandidate(job.id)}
                         className="text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
                         title="Delete"
                       >
@@ -302,6 +302,19 @@ export default function ServerCron() {
             stderr: l.status === "failed" ? l.output || "Execution failed" : "",
           })) || []
         }
+      />
+      <ConfirmActionDialog
+        open={!!deleteCandidate}
+        title="Delete cron job?"
+        description="This permanently removes the selected scheduler job."
+        confirmLabel="Delete Job"
+        onClose={() => setDeleteCandidate(null)}
+        onConfirm={() => {
+          if (!deleteCandidate) return;
+          void handleDelete(deleteCandidate).finally(() => setDeleteCandidate(null));
+        }}
+        pending={false}
+        tone="danger"
       />
     </div>
   );

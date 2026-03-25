@@ -54,6 +54,8 @@ export const useServerDetail = (id: string, options?: { enabled?: boolean }) => 
         ssh_port: dto.ssh_port ?? 22,
         ssh_user: dto.ssh_user ?? "root",
         tunnel_enabled: dto.tunnel_enabled ?? false,
+        tunnel_host: dto.tunnel_host,
+        tunnel_port: dto.tunnel_port,
         location: dto.location,
         provider: dto.provider,
         created_at: dto.created_at,
@@ -391,10 +393,7 @@ export const useAddServer = () => {
         os_version: newServer.os_version,
         description: newServer.description,
         environment: newServer.environment,
-        connection_mode:
-          newServer.connection_mode === "ssh"
-            ? "direct"
-            : newServer.connection_mode ?? "agent",
+        connection_mode: newServer.connection_mode ?? "agent",
         cpu_cores: newServer.cpu_cores,
         memory_gb: newServer.memory_gb,
         disk_gb: newServer.disk_gb,
@@ -404,6 +403,11 @@ export const useAddServer = () => {
         ssh_user: newServer.ssh_user,
         ssh_password: newServer.ssh_password,
         ssh_key_path: newServer.ssh_key_path,
+        tunnel_enabled: newServer.tunnel_enabled,
+        tunnel_host: newServer.tunnel_host,
+        tunnel_port: newServer.tunnel_port,
+        tunnel_user: newServer.tunnel_user,
+        tunnel_key_path: newServer.tunnel_key_path,
         tags: newServer.tags,
       });
       return {
@@ -416,10 +420,7 @@ export const useAddServer = () => {
         os: dto.os as Server["os"],
         os_version: dto.os_version ?? "",
         environment: dto.environment,
-        connection_mode:
-          dto.connection_mode === "direct"
-            ? "ssh"
-            : (dto.connection_mode as Server["connection_mode"]) ?? "agent",
+        connection_mode: (dto.connection_mode as Server["connection_mode"]) ?? "agent",
         onboarding_status: dto.onboarding_status,
         cpu_cores: dto.cpu_cores ?? 0,
         memory_gb: dto.memory_gb ?? 0,
@@ -430,7 +431,11 @@ export const useAddServer = () => {
         ssh_user: dto.ssh_user ?? "root",
         ssh_password: newServer.ssh_password,
         ssh_key_path: dto.ssh_key_path,
-        tunnel_enabled: false,
+        tunnel_enabled: dto.tunnel_enabled ?? false,
+        tunnel_host: dto.tunnel_host,
+        tunnel_port: dto.tunnel_port,
+        tunnel_user: dto.tunnel_user,
+        tunnel_key_path: dto.tunnel_key_path,
         tags: dto.tags ?? [],
         agent_version: dto.agent_version,
         created_at: dto.created_at,

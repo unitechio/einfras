@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Save, Trash2, AlertCircle, RefreshCw } from "lucide-react";
 import { Switch } from "@/components/ui/Switch";
 import { Button } from "@/shared/ui/Button";
+import { ConfirmActionDialog } from "@/shared/ui/ConfirmActionDialog";
 import { Input } from "@/shared/ui/Input";
 import { CronScheduleBuilder } from "@/features/cron/components/CronScheduleBuilder";
 import { cronjobsApi, type CronjobDTO } from "@/shared/api/client";
@@ -37,6 +38,7 @@ export default function ServerCronEditorPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [execPreview, setExecPreview] = useState<string[]>([]);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -46,7 +48,7 @@ export default function ServerCronEditorPage() {
       }
       try {
         const job = await cronjobsApi.get(jobId);
-        hydrate(job);
+        setFormData(hydrate(job));
       } catch (error) {
         showNotification({
           type: "error",
@@ -124,7 +126,7 @@ export default function ServerCronEditorPage() {
   };
 
   const handleDelete = async () => {
-    if (!jobId || !window.confirm("Delete this job?")) return;
+    if (!jobId) return;
     setSaving(true);
     try {
       await cronjobsApi.delete(jobId);
@@ -253,7 +255,7 @@ export default function ServerCronEditorPage() {
         <div className="flex items-center justify-between border-t border-zinc-200/60 bg-zinc-50/60 px-8 py-5 dark:border-zinc-800/60 dark:bg-zinc-900/50">
           <div>
             {isEditMode ? (
-              <Button variant="danger" onClick={() => void handleDelete()} disabled={saving}>
+              <Button variant="danger" onClick={() => setDeleteConfirmOpen(true)} disabled={saving}>
                 <Trash2 size={16} className="mr-2" />
                 Delete Job
               </Button>
@@ -270,6 +272,18 @@ export default function ServerCronEditorPage() {
           </div>
         </div>
       </div>
+      <ConfirmActionDialog
+        open={deleteConfirmOpen}
+        title="Delete cron job?"
+        description="This permanently removes the scheduler job and its saved schedule."
+        confirmLabel={saving ? "Deleting..." : "Delete Job"}
+        onClose={() => setDeleteConfirmOpen(false)}
+        onConfirm={() => {
+          void handleDelete().finally(() => setDeleteConfirmOpen(false));
+        }}
+        pending={saving}
+        tone="danger"
+      />
     </div>
   );
 }

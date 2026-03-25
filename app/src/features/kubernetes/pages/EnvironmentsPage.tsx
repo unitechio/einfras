@@ -1,234 +1,452 @@
 "use client";
 
 import {
-    Search,
-    RefreshCw,
-    Download,
-    MoreHorizontal,
-    Settings,
-    ChevronDown,
-    Box,
-    Cpu,
-    Database,
-    Link2,
-    Unlink2,
-    Activity,
-    Layers,
-    Monitor,
-    Plus,
+  Activity,
+  Box,
+  ChevronDown,
+  ChevronRight,
+  Cpu,
+  Database,
+  Download,
+  Globe,
+  Layers,
+  Link2,
+  Monitor,
+  RefreshCw,
+  Search,
+  Server,
+  Unlink2,
 } from "lucide-react";
+
+import { useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+
 import { useEnvironment } from "@/core/EnvironmentContext";
 import type { Environment } from "@/core/EnvironmentContext";
 import { cn } from "@/lib/utils";
-import { Button } from "@/shared/ui/Button";
-import { Input } from "@/shared/ui/Input";
 import { Badge } from "@/shared/ui/Badge";
+import { Button } from "@/shared/ui/Button";
 import { Card } from "@/shared/ui/Card";
-
-const mockEnvironments: Environment[] = [
-    {
-        id: "local-docker",
-        name: "local",
-        type: "docker",
-        status: "up",
-        url: "/var/run/docker.sock",
-        stats: {
-            stacks: 3,
-            containers: 7,
-            images: 6,
-            volumes: 1,
-        }
-    }
-];
-
+import { Input } from "@/shared/ui/Input";
+import { useEnvironmentInventory } from "../api/useEnvironmentInventory";
+import { useImportKubeconfig } from "../api/useKubernetesHooks";
+import { useNotification } from "@/core/NotificationContext";
 
 export default function EnvironmentsPage() {
-    const { selectedEnvironment, setSelectedEnvironment } = useEnvironment();
+  const { data: environments = [], isLoading, refetch, isFetching } = useEnvironmentInventory();
+  const { selectedEnvironment, setSelectedEnvironment } = useEnvironment();
+  const navigate = useNavigate();
+  const [search, setSearch] = useState("");
+  const [platformFilter, setPlatformFilter] = useState<"all" | "docker" | "kubernetes">("all");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const importKubeconfig = useImportKubeconfig();
+  const { showNotification } = useNotification();
 
-    return (
-        <div className="space-y-6 animate-in fade-in duration-500 pb-20">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                    <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 flex items-center gap-2">
-                        <Box className="h-6 w-6 text-blue-500" />
-                        Environments
-                    </h1>
-                    <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                        Connect and manage your Kubernetes and Docker environments.
-                    </p>
-                </div>
-                <div className="flex items-center gap-2 w-full sm:w-auto mt-2 sm:mt-0">
-                    <Button variant="outline" size="md">
-                        <Download className="mr-2 h-4 w-4" />
-                        Kubeconfig
-                    </Button>
-                    <Button variant="outline" size="md">
-                        <RefreshCw className="h-4 w-4" />
-                    </Button>
-                    <Button variant="primary" size="md">
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add Environment
-                    </Button>
-                </div>
-            </div>
+  const filteredEnvironments = useMemo(() => {
+    return environments.filter((env) => {
+      const matchesPlatform = platformFilter === "all" || env.type === platformFilter;
+      if (!matchesPlatform) {
+        return false;
+      }
+      const needle = search.trim().toLowerCase();
+      if (!needle) {
+        return true;
+      }
+      return [
+        env.name,
+        env.url,
+        env.os,
+        env.arch,
+        env.type,
+        env.selfHost ? "self-host" : "",
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(needle));
+    });
+  }, [environments, platformFilter, search]);
 
-            {/* Toolbar */}
-            <div className="flex flex-col sm:flex-row gap-3">
-                <div className="w-full sm:max-w-md">
-                    <Input
-                        type="text"
-                        placeholder="Search by name, group, tag, status, URL..."
-                        icon={<Search className="h-4 w-4 text-zinc-600 dark:text-zinc-400" />}
-                    />
-                </div>
-                <div className="flex items-center gap-2 sm:ml-auto">
-                    <FilterSelect label="Platform" />
-                    <FilterSelect label="Status" />
-                    <Button variant="ghost" size="sm" className="text-xs">
-                        Clear all
-                    </Button>
-                </div>
-            </div>
-
-            <div className="space-y-4">
-                {mockEnvironments.map((env) => (
-                    <EnvironmentCard
-                        key={env.id}
-                        env={env}
-                        isSelected={selectedEnvironment?.id === env.id}
-                        onSelect={() => setSelectedEnvironment(env)}
-                        onDisconnect={() => setSelectedEnvironment(null)}
-                    />
-                ))}
-            </div>
-
-            <div className="flex items-center justify-end gap-2 text-xs font-bold text-zinc-600 dark:text-zinc-400 pt-4 border-t border-zinc-200 dark:border-zinc-800">
-                <span>Items per page</span>
-                <select className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded px-2 py-1 outline-none text-zinc-900 dark:text-white">
-                    <option>10</option>
-                    <option>25</option>
-                    <option>50</option>
-                </select>
-            </div>
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500 pb-20">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+            <Box className="h-6 w-6 text-blue-500" />
+            Environments
+          </h1>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            Discovered Docker and Kubernetes runtimes, including the current self-host control plane.
+          </p>
         </div>
-    );
+        <div className="flex w-full items-center gap-2 sm:w-auto">
+          <Button
+            variant="outline"
+            size="md"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importKubeconfig.isPending}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            {importKubeconfig.isPending ? "Importing..." : "Import Kubeconfig"}
+          </Button>
+          <Button variant="outline" size="md" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+          </Button>
+        </div>
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".yaml,.yml,.conf,.config"
+        className="hidden"
+        onChange={async (event) => {
+          const file = event.target.files?.[0];
+          if (!file) {
+            return;
+          }
+          try {
+            const items = await importKubeconfig.mutateAsync({ file, name: file.name.replace(/\.[^.]+$/, "") });
+            showNotification({
+              type: "success",
+              message: "Kubeconfig imported",
+              description: `Imported ${items.length} Kubernetes context${items.length === 1 ? "" : "s"} from ${file.name}.`,
+            });
+          } catch (error) {
+            showNotification({
+              type: "error",
+              message: "Kubeconfig import failed",
+              description: error instanceof Error ? error.message : "Unable to import kubeconfig.",
+            });
+          } finally {
+            event.target.value = "";
+          }
+        }}
+      />
+
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="w-full sm:max-w-md">
+          <Input
+            type="text"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search by node, platform, OS, endpoint..."
+            icon={<Search className="h-4 w-4 text-zinc-600 dark:text-zinc-400" />}
+          />
+        </div>
+        <div className="flex items-center gap-2 sm:ml-auto">
+          <FilterSelect
+            label={platformFilter === "all" ? "Platform" : platformFilter}
+            value={platformFilter}
+            onChange={(value) => setPlatformFilter(value as "all" | "docker" | "kubernetes")}
+            options={[
+              { value: "all", label: "All" },
+              { value: "docker", label: "Docker" },
+              { value: "kubernetes", label: "Kubernetes" },
+            ]}
+          />
+          <Button variant="ghost" size="sm" className="text-xs" onClick={() => {
+            setSearch("");
+            setPlatformFilter("all");
+          }}>
+            Clear all
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {isLoading ? (
+          Array.from({ length: 2 }).map((_, index) => (
+            <Card key={index} className="p-5">
+              <div className="space-y-3">
+                <div className="h-5 w-56 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+                <div className="h-4 w-80 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+                <div className="h-4 w-full animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+              </div>
+            </Card>
+          ))
+        ) : filteredEnvironments.length === 0 ? (
+          <Card className="p-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
+            No detected Docker or Kubernetes environments matched the current filters.
+          </Card>
+        ) : (
+          filteredEnvironments.map((env) => (
+            <EnvironmentCard
+              key={env.id}
+              env={env}
+              isSelected={selectedEnvironment?.id === env.id}
+              onSelect={() => {
+                setSelectedEnvironment(env);
+                navigate("/environments");
+              }}
+              onDisconnect={() => setSelectedEnvironment(null)}
+            />
+          ))
+        )}
+      </div>
+
+      {selectedEnvironment ? <EnvironmentDashboardPanel env={selectedEnvironment} /> : null}
+    </div>
+  );
 }
 
-function FilterSelect({ label }: { label: string }) {
-    return (
-        <div className="flex items-center gap-2 bg-white dark:bg-[#121212] border border-zinc-200 dark:border-zinc-800 rounded-md px-3 py-1.5 text-[13px] font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer transition-colors shadow-sm">
-            <span>{label}</span>
-            <ChevronDown size={14} />
-        </div>
-    )
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="appearance-none rounded-md border border-zinc-200 bg-white px-3 py-1.5 pr-8 text-[13px] font-medium text-zinc-600 outline-none transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-[#121212] dark:text-zinc-400 dark:hover:bg-zinc-800/50"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+      <span className="sr-only">{label}</span>
+    </div>
+  );
 }
 
 function EnvironmentCard({
-    env,
-    isSelected,
-    onSelect,
-    onDisconnect
+  env,
+  isSelected,
+  onSelect,
+  onDisconnect,
 }: {
-    env: Environment;
-    isSelected: boolean;
-    onSelect: () => void;
-    onDisconnect: () => void;
+  env: Environment;
+  isSelected: boolean;
+  onSelect: () => void;
+  onDisconnect: () => void;
 }) {
-    return (
-        <Card
-            className={cn(
-                "group p-5 transition-all duration-300 relative",
-                isSelected
-                    ? "border-blue-500/50 ring-1 ring-blue-500/50 shadow-sm"
-                    : "hover:border-zinc-300 dark:hover:border-zinc-300 dark:border-zinc-700"
-            )}
-        >
-            <div className="flex items-start gap-5">
-                <div className="w-12 h-12 bg-blue-50 dark:bg-blue-500/10 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <Box className="w-6 h-6 text-blue-500" />
-                </div>
+  const isDocker = env.type === "docker";
+  const lastSeen = env.lastSeen ? new Date(env.lastSeen).toLocaleString() : "Just now";
 
-                <div className="flex-1 space-y-3">
-                    <div className="flex flex-wrap items-center gap-3">
-                        <h3 className="text-base font-semibold text-zinc-900 dark:text-white">{env.name}</h3>
-                        <Badge variant={env.status === 'up' ? 'success' : 'error'} className="uppercase">
-                            {env.status === 'up' && <div className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5 animate-pulse" />}
-                            {env.status}
-                        </Badge>
-                        <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                            <Activity size={12} />
-                            <span>Last seen: Just now</span>
-                            <span className="text-zinc-600 dark:text-zinc-400 dark:text-zinc-600">•</span>
-                            <span>{env.url}</span>
-                        </div>
-                    </div>
+  return (
+    <Card
+      className={cn(
+        "group p-5 transition-all duration-300",
+        isSelected
+          ? "border-blue-500/50 ring-1 ring-blue-500/50 shadow-sm"
+          : "hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-300",
+      )}
+    >
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-500/10">
+          {isDocker ? (
+            <Box className="h-6 w-6 text-blue-500" />
+          ) : (
+            <Server className="h-6 w-6 text-blue-500" />
+          )}
+        </div>
 
-                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-zinc-600 dark:text-zinc-400 font-medium">
-                        <div className="flex items-center gap-2">
-                            <Layers size={14} className="text-zinc-600 dark:text-zinc-400" />
-                            <span>{env.stats?.stacks} stacks</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Box size={14} className="text-zinc-600 dark:text-zinc-400" />
-                            <span>{env.stats?.containers} containers</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Database size={14} className="text-zinc-600 dark:text-zinc-400" />
-                            <span>{env.stats?.images} images</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Cpu size={14} className="text-zinc-600 dark:text-zinc-400" />
-                            <span>1 CPU</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Monitor size={14} className="text-zinc-600 dark:text-zinc-400" />
-                            <span>2.1 GB RAM</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="flex flex-col gap-2 min-w-[140px]">
-                    {isSelected ? (
-                        <Button
-                            variant="outline"
-                            onClick={(e) => { e.stopPropagation(); onDisconnect(); }}
-                            className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 dark:text-red-400 dark:border-red-900/50 dark:hover:bg-red-900/20 dark:hover:border-red-900"
-                        >
-                            <Unlink2 className="mr-2 h-4 w-4" />
-                            Disconnect
-                        </Button>
-                    ) : (
-                        <Button
-                            variant="primary"
-                            onClick={(e) => { e.stopPropagation(); onSelect(); }}
-                            className="w-full"
-                        >
-                            <Link2 className="mr-2 h-4 w-4" />
-                            Connect
-                        </Button>
-                    )}
-                    <div
-                        className={cn(
-                            "flex items-center justify-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium border transition-all mt-1",
-                            isSelected
-                                ? "bg-green-50 border-green-200 text-green-700 dark:bg-green-500/10 dark:border-green-500/20 dark:text-green-400"
-                                : "bg-zinc-50 border-zinc-200 text-zinc-600 dark:bg-[#121212] dark:border-zinc-800 dark:text-zinc-400"
-                        )}
-                    >
-                        <span className={cn("w-2 h-2 rounded-full", isSelected ? "bg-green-500 animate-pulse" : "bg-zinc-400 dark:bg-zinc-600")}></span>
-                        {isSelected ? "Connected" : "Disconnected"}
-                    </div>
-                </div>
-
-                <div className="flex flex-col gap-1 ml-2">
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-600 dark:text-zinc-400">
-                        <Settings size={16} />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-600 dark:text-zinc-400">
-                        <MoreHorizontal size={16} />
-                    </Button>
-                </div>
+        <div className="flex-1 space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className="text-base font-semibold text-zinc-900 dark:text-white">
+              {env.name}
+            </h3>
+            <Badge variant={env.status === "up" ? "success" : "error"} className="uppercase">
+              {env.status}
+            </Badge>
+            <Badge variant="outline" className="uppercase">
+              {env.type}
+            </Badge>
+            {env.selfHost ? <Badge variant="outline">self-host</Badge> : null}
+            <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+              <Activity size={12} />
+              <span>Last seen: {lastSeen}</span>
+              <span>•</span>
+              <span>{env.url}</span>
             </div>
-        </Card>
-    );
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">
+            {isDocker ? (
+              <>
+                <Stat icon={<Layers size={14} />} label={`${env.stats?.stacks ?? 0} stacks`} />
+                <Stat icon={<Box size={14} />} label={`${env.stats?.containers ?? 0} containers`} />
+                <Stat icon={<Database size={14} />} label={`${env.stats?.images ?? 0} images`} />
+                <Stat icon={<Database size={14} />} label={`${env.stats?.volumes ?? 0} volumes`} />
+              </>
+            ) : (
+              <>
+                <Stat icon={<Server size={14} />} label={`${env.stats?.nodes ?? 0} nodes`} />
+                <Stat icon={<Layers size={14} />} label={`${env.stats?.readyNodes ?? 0} ready`} />
+                <Stat icon={<Database size={14} />} label={`${env.stats?.namespaces ?? 0} namespaces`} />
+                <Stat icon={<Box size={14} />} label={`${env.stats?.pods ?? 0} pods`} />
+              </>
+            )}
+            <Stat icon={<Cpu size={14} />} label={`${env.cpuCores ?? 0} CPU`} />
+            <Stat icon={<Monitor size={14} />} label={`${Number(env.memoryGB ?? 0).toFixed(1)} GB RAM`} />
+          </div>
+
+          <div className="text-xs text-zinc-500 dark:text-zinc-400">
+            {env.os ? env.os : "unknown OS"}
+            {env.arch ? ` • ${env.arch}` : ""}
+            {env.serverId ? ` • node ${env.serverId}` : ""}
+          </div>
+        </div>
+
+        <div className="flex min-w-[140px] flex-col gap-2">
+          {isSelected ? (
+            <Button
+              variant="outline"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDisconnect();
+              }}
+              className="w-full text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+            >
+              <Unlink2 className="mr-2 h-4 w-4" />
+              Disconnect
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelect();
+              }}
+              className="w-full"
+            >
+              <Link2 className="mr-2 h-4 w-4" />
+              Connect
+            </Button>
+          )}
+          <div
+            className={cn(
+              "mt-1 flex items-center justify-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-all",
+              isSelected
+                ? "border-green-200 bg-green-50 text-green-700 dark:border-green-500/20 dark:bg-green-500/10 dark:text-green-400"
+                : "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-[#121212] dark:text-zinc-400",
+            )}
+          >
+            <span
+              className={cn(
+                "h-2 w-2 rounded-full",
+                isSelected ? "bg-green-500 animate-pulse" : "bg-zinc-400 dark:bg-zinc-600",
+              )}
+            />
+            {isSelected ? "Connected" : "Disconnected"}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function Stat({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-zinc-600 dark:text-zinc-400">{icon}</span>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function EnvironmentDashboardPanel({ env }: { env: Environment }) {
+  const navigate = useNavigate();
+  const isDocker = env.type === "docker";
+  const quickLinks = isDocker
+    ? [
+        { label: "Open Containers", path: "/containers" },
+        { label: "Open Images", path: "/images" },
+        { label: "Open Networks", path: "/networks" },
+      ]
+    : [
+        { label: "Open Pods", path: "/pods" },
+        { label: "Open Deployments", path: "/deployments" },
+        { label: "Open Services", path: "/services" },
+      ];
+
+  return (
+    <Card className="p-6">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            <Globe size={12} />
+            Environment Dashboard
+          </div>
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">{env.name}</h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            {isDocker
+              ? "Live runtime overview for the selected Docker environment."
+              : "Live runtime overview for the selected Kubernetes environment."}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {isDocker ? (
+            <>
+              <MetricCard label="Containers" value={String(env.stats?.containers ?? 0)} />
+              <MetricCard label="Stacks" value={String(env.stats?.stacks ?? 0)} />
+              <MetricCard label="Images" value={String(env.stats?.images ?? 0)} />
+              <MetricCard label="Volumes" value={String(env.stats?.volumes ?? 0)} />
+            </>
+          ) : (
+            <>
+              <MetricCard label="Nodes" value={String(env.stats?.nodes ?? 0)} />
+              <MetricCard label="Ready Nodes" value={String(env.stats?.readyNodes ?? 0)} />
+              <MetricCard label="Namespaces" value={String(env.stats?.namespaces ?? 0)} />
+              <MetricCard label="Pods" value={String(env.stats?.pods ?? 0)} />
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/30">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <InfoRow label="Endpoint" value={env.url} />
+            <InfoRow label="Platform" value={env.type} />
+            <InfoRow label="OS" value={env.os || "unknown"} />
+            <InfoRow label="Architecture" value={env.arch || "unknown"} />
+            <InfoRow label="CPU Cores" value={String(env.cpuCores ?? 0)} />
+            <InfoRow label="Memory" value={`${Number(env.memoryGB ?? 0).toFixed(1)} GB`} />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {quickLinks.map((item) => (
+            <button
+              key={item.path}
+              onClick={() => navigate(item.path)}
+              className="flex w-full items-center justify-between rounded-xl border border-zinc-200 px-4 py-3 text-left transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900/40"
+            >
+              <span className="text-sm font-medium text-zinc-800 dark:text-zinc-100">{item.label}</span>
+              <ChevronRight size={16} className="text-zinc-400" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+      <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{label}</div>
+      <div className="mt-1 text-xl font-semibold text-zinc-900 dark:text-zinc-50">{value}</div>
+    </div>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{label}</div>
+      <div className="mt-1 break-all text-sm font-medium text-zinc-900 dark:text-zinc-100">{value}</div>
+    </div>
+  );
 }
