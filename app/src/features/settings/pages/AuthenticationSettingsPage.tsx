@@ -146,8 +146,8 @@ export default function AuthenticationSettingsPage() {
   }
 
   return (
-    <div className="space-y-6 pb-12">
-      <section className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 p-8 text-white shadow-sm">
+    <div className="space-y-6 pb-20">
+      <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 p-8 text-white shadow-sm dark:border-zinc-800">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="max-w-2xl">
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-cyan-200">
@@ -158,116 +158,164 @@ export default function AuthenticationSettingsPage() {
               Authenticator and recovery controls
             </h1>
             <p className="mt-2 text-sm leading-6 text-slate-300">
-              Scan a real QR code with Google or Microsoft Authenticator, then keep the recovery codes safe for incident response.
+              Scan a real QR code with Google or Microsoft Authenticator, then
+              keep the recovery codes safe for incident response.
             </p>
           </div>
-          <div className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 backdrop-blur">
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 backdrop-blur">
             <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
               Current state
             </div>
             <div className="mt-2 text-lg font-semibold text-white">
               {totpEnabled ? "MFA Enabled" : "MFA Not Enabled"}
             </div>
-            <div className="mt-1 text-sm text-slate-300">{sessionEmail || "No session email"}</div>
+            <div className="mt-1 text-sm text-slate-300">
+              {sessionEmail || "No session email"}
+            </div>
           </div>
         </div>
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <section className="rounded-[2rem] border border-zinc-200 bg-white p-8 shadow-sm">
+        <section className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-400">
               <Smartphone className="h-6 w-6" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-zinc-950">
+              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                 TOTP authenticator setup
               </h2>
-              <p className="text-sm text-zinc-500">
-                Scan the QR below, then confirm with the 6-digit code from your app.
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                Scan the QR below, then confirm with the 6-digit code from your
+                app.
               </p>
             </div>
           </div>
 
           {!setupToken ? (
-            <div className="mt-8 rounded-3xl border border-dashed border-zinc-300 bg-zinc-50 px-6 py-10 text-center">
-              <QrCode className="mx-auto h-10 w-10 text-zinc-400" />
-              <h3 className="mt-4 text-base font-semibold text-zinc-900">
+            <div className="mt-8 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-6 py-12 text-center dark:border-zinc-800 dark:bg-zinc-950/50">
+              <QrCode className="mx-auto h-12 w-12 text-zinc-400 dark:text-zinc-600" />
+              <h3 className="mt-4 text-base font-semibold text-zinc-900 dark:text-zinc-50">
                 Generate a fresh MFA enrollment
               </h3>
-              <p className="mx-auto mt-2 max-w-lg text-sm text-zinc-500">
-                This creates a temporary setup token, shared secret and recovery codes for the current signed-in account.
+              <p className="mx-auto mt-2 max-w-lg text-sm text-zinc-500 dark:text-zinc-400">
+                This creates a temporary setup token, shared secret and recovery
+                codes for the current signed-in account.
               </p>
-              <Button className="mt-5" onClick={handleBeginSetup} isLoading={isLoading}>
+              <Button
+                variant="primary"
+                className="mt-6 shadow-lg shadow-indigo-500/20"
+                onClick={handleBeginSetup}
+                isLoading={isLoading}
+              >
                 Begin MFA Setup
               </Button>
             </div>
           ) : (
             <div className="mt-8 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-              <div className="rounded-3xl border border-zinc-200 bg-slate-50 p-5">
-                <div className="rounded-[1.5rem] bg-white p-4 shadow-sm">
+              <div className="rounded-2xl border border-zinc-200 bg-slate-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
+                <div className="rounded-[1.5rem] bg-white p-4 shadow-sm dark:bg-[#121212]">
                   {qrImage ? (
                     <img
                       src={qrImage}
                       alt="Authenticator QR code"
-                      className="mx-auto w-full max-w-72 rounded-2xl"
+                      className="mx-auto w-full max-w-72 rounded-xl"
                     />
                   ) : (
-                    <div className="flex h-72 items-center justify-center rounded-2xl border border-dashed border-zinc-300 text-sm text-zinc-500">
+                    <div className="flex h-72 items-center justify-center rounded-xl border border-dashed border-zinc-300 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-600">
                       Preparing QR code...
                     </div>
                   )}
                 </div>
-                <div className="mt-4 text-center text-sm text-zinc-600">
-                  Scan this code in Google Authenticator or Microsoft Authenticator.
+                <div className="mt-4 text-center text-sm text-zinc-600 dark:text-zinc-400">
+                  Scan this code in Google Authenticator or Microsoft
+                  Authenticator.
                 </div>
               </div>
 
               <div className="space-y-5">
                 <div className="grid gap-3 sm:grid-cols-3">
                   {[
-                    { step: "01", label: "Scan QR", detail: "Open Google or Microsoft Authenticator." },
-                    { step: "02", label: "Store codes", detail: "Save recovery codes in a secure vault." },
-                    { step: "03", label: "Confirm", detail: "Enter the 6-digit code to activate MFA." },
+                    {
+                      step: "01",
+                      label: "Scan QR",
+                      detail: "Open Google or Microsoft Authenticator.",
+                    },
+                    {
+                      step: "02",
+                      label: "Store codes",
+                      detail: "Save recovery codes in a secure vault.",
+                    },
+                    {
+                      step: "03",
+                      label: "Confirm",
+                      detail: "Enter the 6-digit code to activate MFA.",
+                    },
                   ].map((item) => (
-                    <div key={item.step} className="rounded-3xl border border-zinc-200 bg-white px-4 py-4 shadow-sm">
-                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">{item.step}</div>
-                      <div className="mt-2 text-sm font-semibold text-zinc-950">{item.label}</div>
-                      <div className="mt-1 text-xs leading-5 text-zinc-500">{item.detail}</div>
+                    <div
+                      key={item.step}
+                      className="rounded-2xl border border-zinc-200 bg-white px-4 py-4 shadow-sm dark:border-zinc-800 dark:bg-[#121212]"
+                    >
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-500">
+                        {item.step}
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                        {item.label}
+                      </div>
+                      <div className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                        {item.detail}
+                      </div>
                     </div>
                   ))}
                 </div>
 
-                <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5">
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-sm font-semibold text-zinc-950">Manual setup secret</div>
-                      <div className="text-xs text-zinc-500">
-                        Use this only if camera scanning is unavailable.
+                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                        Manual setup secret
                       </div>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => void copyText("Secret", secret)}>
-                      <Copy className="mr-2 h-3.5 w-3.5" />
-                      Copy
-                    </Button>
-                  </div>
-                  <div className="mt-3 rounded-2xl bg-white px-4 py-3 font-mono text-sm tracking-[0.2em] text-zinc-900 shadow-sm">
-                    {secret}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-zinc-950">Recovery codes</div>
-                      <div className="text-xs text-zinc-500">
-                        Each code works once when your authenticator is unavailable.
+                      <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                        Use this only if camera scanning is unavailable.
                       </div>
                     </div>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => void copyText("Recovery codes", recoveryCodes.join("\n"))}
+                      onClick={() => void copyText("Secret", secret)}
+                      className="dark:border-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+                    >
+                      <Copy className="mr-2 h-3.5 w-3.5" />
+                      Copy
+                    </Button>
+                  </div>
+                  <div className="mt-3 rounded-xl bg-white px-4 py-3 font-mono text-sm tracking-[0.2em] text-zinc-900 shadow-sm dark:bg-[#121212] dark:text-zinc-100">
+                    {secret}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                        Recovery codes
+                      </div>
+                      <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                        Each code works once when your authenticator is
+                        unavailable.
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        void copyText(
+                          "Recovery codes",
+                          recoveryCodes.join("\n"),
+                         )
+                      }
+                      className="dark:border-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700"
                     >
                       <Copy className="mr-2 h-3.5 w-3.5" />
                       Copy All
@@ -277,7 +325,7 @@ export default function AuthenticationSettingsPage() {
                     {recoveryCodes.map((code) => (
                       <code
                         key={code}
-                        className="rounded-2xl bg-white px-3 py-2 text-center text-sm text-zinc-800 shadow-sm"
+                        className="rounded-xl bg-white px-3 py-2 text-center text-sm text-zinc-800 shadow-sm dark:bg-[#121212] dark:text-zinc-300"
                       >
                         {code}
                       </code>
@@ -285,8 +333,8 @@ export default function AuthenticationSettingsPage() {
                   </div>
                 </div>
 
-                <div className="rounded-3xl border border-zinc-200 bg-white p-5">
-                  <label className="text-sm font-medium text-zinc-900">
+                <div className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-[#121212]">
+                  <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
                     Confirm setup code
                   </label>
                   <Input
@@ -296,7 +344,8 @@ export default function AuthenticationSettingsPage() {
                     className="mt-2"
                   />
                   <Button
-                    className="mt-4"
+                    variant="primary"
+                    className="mt-4 w-full shadow-lg shadow-indigo-500/20"
                     onClick={handleConfirmSetup}
                     isLoading={isLoading}
                     disabled={confirmCode.trim().length < 6}
@@ -309,23 +358,25 @@ export default function AuthenticationSettingsPage() {
           )}
         </section>
 
-        <section className="space-y-6 rounded-[2rem] border border-zinc-200 bg-white p-8 shadow-sm">
+        <section className="space-y-6 rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
               <Mail className="h-6 w-6" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-zinc-950">
+              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                 Recovery workflow
               </h2>
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
                 Reset notifications go to the mailbox attached to this account.
               </p>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5">
-            <label className="text-sm font-medium text-zinc-900">Account email</label>
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
+            <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+              Account email
+            </label>
             <Input
               value={sessionEmail}
               onChange={(event) => setSessionEmail(event.target.value)}
@@ -333,7 +384,8 @@ export default function AuthenticationSettingsPage() {
               className="mt-2"
             />
             <Button
-              className="mt-4"
+              variant="primary"
+              className="mt-4 w-full shadow-lg shadow-indigo-500/20"
               onClick={handleResetRequest}
               isLoading={isLoading}
               disabled={!sessionEmail.trim()}
@@ -342,23 +394,39 @@ export default function AuthenticationSettingsPage() {
             </Button>
           </div>
 
-          <div className="rounded-3xl border border-zinc-200 bg-slate-50 p-5">
-            <div className="flex items-center gap-2 text-sm font-semibold text-zinc-950">
-              <KeyRound className="h-4 w-4" />
+          <div className="rounded-2xl border border-zinc-200 bg-slate-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/20">
+            <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+              <KeyRound className="h-4 w-4 text-indigo-500" />
               What this security flow covers
             </div>
-            <ul className="mt-3 space-y-2 text-sm text-zinc-600">
-              <li>Password reset email with one-time token</li>
-              <li>Authenticator reset email with one-time token</li>
-              <li>New login notification after successful sign-in</li>
-              <li>Recovery codes for offline account regain</li>
+            <ul className="mt-3 space-y-2 text-sm text-zinc-600 dark:text-zinc-400">
+              <li className="flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+                Password reset email with one-time token
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+                Authenticator reset email with one-time token
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+                New login notification after successful sign-in
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+                Recovery codes for offline account regain
+              </li>
             </ul>
           </div>
 
-          <div className="rounded-3xl border border-cyan-200 bg-cyan-50 p-5">
-            <div className="text-sm font-semibold text-cyan-950">Operator note</div>
-            <div className="mt-2 text-sm leading-6 text-cyan-900">
-              MFA setup is generated from the live backend session. If you rotate authenticator apps, request a reset first instead of regenerating secrets in place.
+          <div className="rounded-2xl border border-cyan-200 bg-cyan-50 p-5 dark:border-cyan-500/20 dark:bg-cyan-500/10">
+            <div className="text-sm font-semibold text-cyan-950 dark:text-cyan-50">
+              Operator note
+            </div>
+            <div className="mt-2 text-sm leading-6 text-cyan-900 dark:text-cyan-100/70">
+              MFA setup is generated from the live backend session. If you
+              rotate authenticator apps, request a reset first instead of
+              regenerating secrets in place.
             </div>
           </div>
         </section>
