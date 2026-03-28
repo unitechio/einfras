@@ -110,15 +110,39 @@ function PageHeader({ onLogout }: { onLogout: () => void }) {
   const getPageTitle = (path: string) => {
     const routeTitles: Record<string, string> = {
       "/": "Dashboard Overview",
+      "/dashboard": "Dashboard Overview",
       "/environments": "Environments",
       "/users": "User Management",
       "/roles": "Role Assignments",
       "/networks": "Network Infrastructure",
       "/registries": "Container Registries",
       "/events": "Activity Audit Logs",
-      "/profile": "My Settings",
+      "/profile": "My Profile Settings",
+      "/settings/general": "Global Preferences",
+      "/settings/authentication": "Security & MFA",
+      "/settings/edge-compute": "Node Management",
+      "/settings/feature-flags": "Core Feature Flags",
+      "/settings/license": "License Management",
+      "/settings/notification-routing": "Notification Routing",
+      "/servers": "Server Inventory",
+      "/kubernetes": "Cluster Explorer",
+      "/repositories": "Global Repositories",
+      "/monitoring": "System Health Overview",
+      "/containers": "Container Inventory",
+      "/images": "Image Library",
+      "/stacks": "Stack Deployments",
+      "/volumes": "Storage Volumes",
+      "/notifications": "Recent Alerts",
+      "/tags": "Label Management",
+      "/applications": "Application Catalog",
     };
-    return routeTitles[path] || "Dashboard";
+
+    // Special cases for details
+    if (path.startsWith("/settings/")) {
+      return routeTitles[path] || "Site Settings";
+    }
+
+    return routeTitles[path] || "Dashboard Overview";
   };
 
   return (

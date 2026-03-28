@@ -39,6 +39,7 @@ export default function Topbar({
   const getBreadcrumbs = () => {
     const crumbs = [];
 
+    // Base root
     if (selectedEnvironment) {
       crumbs.push({ label: "Environments", path: "/environments" });
       crumbs.push({
@@ -55,8 +56,14 @@ export default function Topbar({
       }
     } else {
       crumbs.push({ label: "Administration", path: "/" });
+
+      // If in settings, add a "Settings" link
+      if (location.pathname.startsWith("/settings/")) {
+        crumbs.push({ label: "Settings", path: "/settings" });
+      }
+
       if (location.pathname !== "/") {
-        crumbs.push({ label: currentPage, active: true });
+        crumbs.push({ label: currentPage || "Dashboard", active: true });
       }
     }
 
