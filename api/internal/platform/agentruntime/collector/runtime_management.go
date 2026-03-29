@@ -194,6 +194,7 @@ type DockerFileEntry struct {
 	Size     int64     `json:"size"`
 	Mode     string    `json:"mode"`
 	IsDir    bool      `json:"is_dir"`
+	IsLink   bool      `json:"is_link"`
 	Modified time.Time `json:"modified"`
 }
 
@@ -1476,37 +1477,85 @@ func GetDockerContainerStats(containerID string) (*DockerContainerStats, error) 
 }
 
 func ListDockerContainerFiles(containerID, targetPath string) ([]DockerFileEntry, error) {
-	localPath, cleanup, err := copyDockerPathToTemp(containerID, firstNonEmpty(strings.TrimSpace(targetPath), "/"))
+	containerPath := firstNonEmpty(strings.TrimSpace(targetPath), "/")
+	// Use ls -apL to list files and follow symlink metadata to avoid copying to host.
+	// We use -l --time-style=long-iso if available, or just -l.
+	// Combining commands to be safe across different OSes (busybox vs coreutils).
+	// We'll use a shell script via docker exec to get a standardized format.
+	lsCmd := fmt.Sprintf("ls -ap -l --time-style=long-iso %s 2>/dev/null || ls -ap -l %s", containerPath, containerPath)
+	output, err := exec.Command("docker", "exec", containerID, "sh", "-c", lsCmd).CombinedOutput()
 	if err != nil {
-		return nil, err
+		// If ls fails, it might be an empty directory or missing path, but docker exec might return non-zero.
+		// Check if it's actually an error.
+		if len(output) == 0 {
+			return nil, fmt.Errorf("failed to list files in container: %v", err)
+		}
 	}
-	defer cleanup()
 
-	info, err := os.Stat(localPath)
-	if err != nil {
-		return nil, err
-	}
-	if !info.IsDir() {
-		return []DockerFileEntry{dockerFileEntryFromInfo(localPath, info, targetPath)}, nil
-	}
-	entries, err := os.ReadDir(localPath)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]DockerFileEntry, 0, len(entries))
-	for _, entry := range entries {
-		childInfo, err := entry.Info()
-		if err != nil {
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	items := make([]DockerFileEntry, 0)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "total ") {
 			continue
 		}
-		items = append(items, dockerFileEntryFromInfo(filepath.Join(localPath, entry.Name()), childInfo, filepath.Join(firstNonEmpty(strings.TrimSpace(targetPath), "/"), entry.Name())))
+
+		parts := strings.Fields(line)
+		if len(parts) < 8 {
+			continue
+		}
+
+		// Typical ls -l output:
+		// -rw-r--r--    1 root     root          1024 Jan 01 00:00 filename
+		// or with long-iso:
+		// -rw-r--r--    1 root     root          1024 2023-01-01 00:00 filename
+
+		mode := parts[0]
+		isDir := strings.HasPrefix(mode, "d")
+		isLink := strings.HasPrefix(mode, "l")
+		size, _ := strconv.ParseInt(parts[4], 10, 64)
+
+		name := parts[len(parts)-1]
+		if name == "." || name == ".." {
+			continue
+		}
+
+		// Clean name from ls -p suffix (/)
+		cleanName := strings.TrimSuffix(name, "/")
+		
+		var modified time.Time
+		// Try to parse date from parts[5], parts[6], parts[7]
+		// long-iso: 2023-01-01 00:00
+		if len(parts) >= 8 {
+			dateStr := parts[5] + " " + parts[6]
+			if t, err := time.Parse("2006-01-02 15:04", dateStr); err == nil {
+				modified = t
+			} else {
+				// Fallback to simpler parse if not long-iso (Jan 01 00:00)
+				// Note: this is harder without year, so we just skip for now or use current year
+				modified = time.Now()
+			}
+		}
+
+		items = append(items, DockerFileEntry{
+			Name:     cleanName,
+			Path:     filepath.ToSlash(filepath.Join(containerPath, cleanName)),
+			Size:     size,
+			Mode:     mode,
+			IsDir:    isDir || strings.HasSuffix(name, "/"),
+			IsLink:   isLink,
+			Modified: modified,
+		})
 	}
+
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].IsDir != items[j].IsDir {
 			return items[i].IsDir
 		}
 		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
 	})
+
 	return items, nil
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, buildApiWebSocketUrl } from '@/core/api-client';
-import type { DockerContainer, DockerImage, DockerNetwork, DockerVolume, DockerStack, DockerTopology, RuntimeAuditRecord, DockerAutoHealPolicy, DockerContainerCreateRequest, DockerContainerConfig, DockerSecretAsset, DockerStackService, DockerContainerStats, DockerFileEntry, DockerServiceDetail, DockerRegistryCatalog, DockerImageExportResult, DockerImageImportResult, DockerBuildHistoryRecord, RuntimeAuditFilters, DockerSwarmStatus } from '../types';
+import type { DockerContainer, DockerImage, DockerNetwork, DockerVolume, DockerStack, DockerTopology, RuntimeAuditRecord, DockerAutoHealPolicy, DockerContainerCreateRequest, DockerContainerConfig, DockerSecretAsset, DockerStackService, DockerContainerStats, DockerFileEntry, DockerServiceDetail, DockerRegistryCatalog, DockerImageExportResult, DockerImageImportResult, DockerBuildHistoryRecord, RuntimeAuditFilters, DockerSwarmStatus, DockerDiskUsage } from '../types';
 
 export const dockerKeys = {
   all: ['docker'] as const,
@@ -22,6 +22,7 @@ export const dockerKeys = {
   volumes: (environmentId: string) => [...dockerKeys.all, 'volumes', environmentId] as const,
   stacks: (environmentId: string) => [...dockerKeys.all, 'stacks', environmentId] as const,
   volumeFiles: (environmentId: string, volumeName: string, path: string) => [...dockerKeys.volumes(environmentId), volumeName, 'files', path] as const,
+  diskUsage: (environmentId: string) => [...dockerKeys.all, 'disk-usage', environmentId] as const,
 };
 
 // Containers
@@ -190,6 +191,16 @@ export const useDockerSystemLogs = (environmentId: string, lines: number = 200) 
     },
     enabled: !!environmentId,
     refetchInterval: 15000,
+  });
+};
+
+export const useDockerDiskUsage = (environmentId: string) => {
+  return useQuery({
+    queryKey: dockerKeys.diskUsage(environmentId),
+    queryFn: async (): Promise<DockerDiskUsage> => {
+      return apiFetch(`/v1/environments/${environmentId}/docker/disk-usage`);
+    },
+    enabled: !!environmentId,
   });
 };
 
@@ -878,8 +889,9 @@ export const useDeleteDockerAutoHealPolicy = (environmentId: string) => {
 export const useRunDockerAutoHeal = (environmentId: string) => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
-      return apiFetch<DockerAutoHealPolicy[]>(`/v1/environments/${environmentId}/docker/autoheal/run`, {
+    mutationFn: async (policyId?: string) => {
+      const suffix = policyId ? `?policy_id=${encodeURIComponent(policyId)}` : '';
+      return apiFetch<DockerAutoHealPolicy[]>(`/v1/environments/${environmentId}/docker/autoheal/run${suffix}`, {
         method: 'POST',
       });
     },
