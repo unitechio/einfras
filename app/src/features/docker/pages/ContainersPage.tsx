@@ -147,6 +147,15 @@ const truncateText = (value: string, maxLength = 42) => {
   return `${value.slice(0, maxLength - 1)}…`;
 };
 
+const relativeTime = (unixSeconds: number): string => {
+  const diff = Math.floor(Date.now() / 1000) - unixSeconds;
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 86400 * 30) return `${Math.floor(diff / 86400)}d ago`;
+  return new Date(unixSeconds * 1000).toLocaleDateString();
+};
+
     return (
         <div className="space-y-6 animate-in fade-in duration-500 pb-20">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -283,10 +292,18 @@ const truncateText = (value: string, maxLength = 42) => {
                                             </div>
                                         </TableCell>
                                         <TableCell>
-                                            <Badge variant={container.State === 'running' ? 'success' : 'error'}>
-                                                {container.State === 'running' && <div className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5 animate-pulse" />}
-                                                {container.State}
-                                            </Badge>
+                                            <div className="flex items-center gap-1.5">
+                                                <div className={`h-2 w-2 rounded-full flex-shrink-0 ${
+                                                    container.State === 'running' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)] animate-pulse' :
+                                                    container.State === 'paused'  ? 'bg-amber-400' :
+                                                    'bg-zinc-400'
+                                                }`} />
+                                                <span className={`text-[12px] font-medium capitalize ${
+                                                    container.State === 'running' ? 'text-emerald-600 dark:text-emerald-400' :
+                                                    container.State === 'paused'  ? 'text-amber-600 dark:text-amber-400' :
+                                                    'text-zinc-500 dark:text-zinc-500'
+                                                }`}>{container.State}</span>
+                                            </div>
                                         </TableCell>
                         <TableCell>
                           <span
@@ -296,20 +313,23 @@ const truncateText = (value: string, maxLength = 42) => {
                             {truncateText(formatImage(container.Image), 48)}
                           </span>
                         </TableCell>
-                                        <TableCell className="text-sm text-zinc-600 dark:text-zinc-400">
-                                            {new Date(container.Created * 1000).toLocaleDateString()}
+                                        <TableCell className="text-xs text-zinc-500 dark:text-zinc-400">
+                                            {relativeTime(container.Created)}
                                         </TableCell>
                                         <TableCell className="text-xs text-zinc-600 dark:text-zinc-400 font-mono">
-                                            <div className="flex flex-wrap gap-1 max-w-[150px]">
-                                                {container.Ports?.slice(0, 2).map((p, idx) => (
-                                                    <span key={idx} className="bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
-                                                        {p.PublicPort ? `${p.PublicPort}:${p.PrivatePort}` : `${p.PrivatePort}`}
+                                            <div className="flex flex-col gap-0.5 max-w-[200px]">
+                                                {container.Ports?.filter(p => p.PublicPort).slice(0, 2).map((p, idx) => (
+                                                    <span key={idx} className="bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap">
+                                                        {p.IP && p.IP !== '0.0.0.0' ? `${p.IP}:` : ''}{p.PublicPort}{'->'}{p.PrivatePort}/{p.Type || 'tcp'}
                                                     </span>
                                                 ))}
-                                                {container.Ports && container.Ports.length > 2 && (
-                                                    <span className="bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">+{container.Ports.length - 2}</span>
+                                                {container.Ports?.some(p => !p.PublicPort) && !container.Ports?.some(p => p.PublicPort) && (
+                                                    <span className="text-zinc-400 text-[11px]">{container.Ports.map(p => `${p.PrivatePort}/${p.Type || 'tcp'}`).slice(0,2).join(', ')}</span>
                                                 )}
-                                                {(!container.Ports || container.Ports.length === 0) && '-'}
+                                                {container.Ports && container.Ports.filter(p => p.PublicPort).length > 2 && (
+                                                    <span className="bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-[11px]">+{container.Ports.filter(p => p.PublicPort).length - 2} more</span>
+                                                )}
+                                                {(!container.Ports || container.Ports.length === 0) && <span className="text-zinc-400">—</span>}
                                             </div>
                                         </TableCell>
                                         <TableCell className="text-right">
@@ -499,6 +519,16 @@ const truncateText = (value: string, maxLength = 42) => {
                     setTerminalSessions((current) =>
                         current.map((item) => (item.tabId === tabId ? { ...item, ...patch } : item)),
                     );
+                }}
+                onAddTab={(cId, cName, envId) => {
+                    const next: DockerTerminalWorkspaceSession = {
+                        tabId: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                        containerId: cId,
+                        containerName: cName,
+                        environmentId: envId,
+                    };
+                    setTerminalSessions((current) => [...current, next]);
+                    setActiveTerminalTabId(next.tabId);
                 }}
             />
             {activeLogs && (
