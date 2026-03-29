@@ -101,14 +101,15 @@ export default function AutoHealPage() {
                         </select>
                     </div>
                     <Button
-                        variant="outline"
+                        variant="primary"
                         onClick={() => runAutoHeal.mutate(undefined, {
-                            onSuccess: () => showNotification({ type: "success", message: "Auto-heal executed", description: "Policies were evaluated against current Docker state." }),
+                            onSuccess: () => showNotification({ type: "success", message: "Auto-heal executed", description: "All policies were evaluated against current Docker state." }),
                             onError: (error: any) => showNotification({ type: "error", message: "Auto-heal run failed", description: error?.message || "Request failed." }),
                         })}
+                        className="bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-rose-600 dark:hover:bg-rose-500"
                     >
                         <Play className="mr-2 h-4 w-4" />
-                        Run Now
+                        Run All Now
                     </Button>
                 </div>
             </div>
@@ -205,15 +206,46 @@ export default function AutoHealPage() {
                                         </TableCell>
                                         <TableCell className="text-sm text-zinc-600 dark:text-zinc-400">{policy.interval_minutes} min</TableCell>
                                         <TableCell>
-                                            <div className="flex flex-col gap-1">
-                                                <Badge variant={policy.last_outcome === "restarted" ? "success" : policy.last_outcome?.includes("failed") ? "error" : "outline"}>
-                                                    {policy.last_outcome || "pending"}
-                                                </Badge>
-                                                {policy.last_run_at ? <span className="text-xs text-zinc-500 dark:text-zinc-400">{new Date(policy.last_run_at).toLocaleString()}</span> : null}
+                                            <div className="flex flex-col gap-0.5">
+                                                <div className="flex items-center gap-1.5">
+                                                    <div className={`h-1.5 w-1.5 rounded-full ${
+                                                        policy.last_outcome === "restarted" ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : 
+                                                        policy.last_outcome?.includes("failed") ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" : 
+                                                        "bg-zinc-400"
+                                                    }`} />
+                                                    <span className={`text-[13px] font-medium ${
+                                                        policy.last_outcome === "restarted" ? "text-emerald-600 dark:text-emerald-400" :
+                                                        policy.last_outcome?.includes("failed") ? "text-rose-600 dark:text-rose-400" :
+                                                        "text-zinc-500 dark:text-zinc-500"
+                                                    }`}>
+                                                        {policy.last_outcome === "restarted" ? "Success" : 
+                                                         policy.last_outcome?.includes("failed") ? "Failed" : 
+                                                         policy.last_outcome === "no_match" ? "No action" :
+                                                         policy.last_outcome || "Pending"}
+                                                    </span>
+                                                </div>
+                                                {policy.last_run_at ? (
+                                                    <span className="text-[11px] text-zinc-400 dark:text-zinc-500 ml-3">
+                                                        {new Date(policy.last_run_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                    </span>
+                                                ) : null}
                                             </div>
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex items-center justify-end opacity-100 gap-1">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    title="Run policy now"
+                                                    disabled={runAutoHeal.isPending}
+                                                    onClick={() => runAutoHeal.mutate(policy.id, {
+                                                        onSuccess: () => showNotification({ type: "success", message: "Policy check triggered", description: `Auto-heal check started for ${policy.name}.` }),
+                                                        onError: (error: any) => showNotification({ type: "error", message: "Trigger failed", description: error?.message || "Request failed." }),
+                                                    })}
+                                                    className="text-zinc-400 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-900/20"
+                                                >
+                                                    <Play size={14} className={runAutoHeal.isPending ? "animate-pulse" : ""} />
+                                                </Button>
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"
@@ -229,7 +261,7 @@ export default function AutoHealPage() {
                                                             enabled: policy.enabled !== false,
                                                         });
                                                     }}
-                                                    className="text-zinc-400 hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-900/20"
+                                                    className="text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                                                 >
                                                     <Pencil size={14} />
                                                 </Button>
