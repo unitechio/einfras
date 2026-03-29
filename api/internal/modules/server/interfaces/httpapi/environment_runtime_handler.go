@@ -237,6 +237,7 @@ func (h *EnvironmentRuntimeHandler) Register(r *mux.Router) {
 	r.HandleFunc("/v1/environments/{id}/docker/autoheal/policies", h.saveDockerAutoHealPolicy).Methods(http.MethodPost)
 	r.HandleFunc("/v1/environments/{id}/docker/autoheal/policies/{policyId}", h.deleteDockerAutoHealPolicy).Methods(http.MethodDelete)
 	r.HandleFunc("/v1/environments/{id}/docker/autoheal/run", h.runDockerAutoHeal).Methods(http.MethodPost)
+	r.HandleFunc("/v1/environments/{id}/docker/disk-usage", h.getDockerDiskUsage).Methods(http.MethodGet)
 	r.HandleFunc("/v1/environments/{id}/audit", h.listEnvironmentAudit).Methods(http.MethodGet)
 
 	r.HandleFunc("/v1/environments/{id}/kubernetes/pods", h.listKubernetesPods).Methods(http.MethodGet)
@@ -2524,17 +2525,36 @@ func (h *EnvironmentRuntimeHandler) deleteDockerAutoHealPolicy(w http.ResponseWr
 
 func (h *EnvironmentRuntimeHandler) runDockerAutoHeal(w http.ResponseWriter, r *http.Request) {
 	environmentID := mux.Vars(r)["id"]
+	policyID := strings.TrimSpace(r.URL.Query().Get("policy_id"))
 	if _, err := h.requireLocalEnvironment(r.Context(), environmentID, "docker"); err != nil {
 		writeError(w, http.StatusBadRequest, "environment_runtime", "docker.autoheal.run", "unsupported_environment", err.Error(), nil)
 		return
 	}
-	items, err := collector.RunDockerAutoHealPolicies(environmentID)
+	items, err := collector.RunDockerAutoHealPolicies(environmentID, policyID)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "environment_runtime", "docker.autoheal.run", "docker_autoheal_run_failed", err.Error(), nil)
 		return
 	}
-	_ = h.auditEnvironmentAction(r, environmentID, "docker.autoheal.run", "autoheal_policy", environmentID, "success", "Auto-heal evaluation executed", map[string]any{"policies": len(items)})
+	details := "Auto-heal evaluation executed"
+	if policyID != "" {
+		details = fmt.Sprintf("Auto-heal policy %s evaluation executed", policyID)
+	}
+	_ = h.auditEnvironmentAction(r, environmentID, "docker.autoheal.run", "autoheal_policy", environmentID, "success", details, map[string]any{"policies": len(items), "policy_id": policyID})
 	writeJSON(w, http.StatusOK, items)
+}
+
+func (h *EnvironmentRuntimeHandler) getDockerDiskUsage(w http.ResponseWriter, r *http.Request) {
+	environmentID := mux.Vars(r)["id"]
+	if _, err := h.requireLocalEnvironment(r.Context(), environmentID, "docker"); err != nil {
+		writeError(w, http.StatusBadRequest, "environment_runtime", "docker.disk_usage", "unsupported_environment", err.Error(), nil)
+		return
+	}
+	result, err := collector.GetDockerDiskUsage()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "environment_runtime", "docker.disk_usage", "docker_disk_usage_failed", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *EnvironmentRuntimeHandler) listKubernetesPods(w http.ResponseWriter, r *http.Request) {

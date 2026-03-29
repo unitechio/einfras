@@ -2427,7 +2427,8 @@ func DeleteDockerAutoHealPolicy(policyID string) error {
 	return writeDockerAutoHealPolicies(filtered)
 }
 
-func RunDockerAutoHealPolicies(environmentID string) ([]DockerAutoHealPolicy, error) {
+func RunDockerAutoHealPolicies(environmentID string, policyID string) ([]DockerAutoHealPolicy, error) {
+	manualRun := policyID != ""
 	policies, err := ListDockerAutoHealPolicies(environmentID)
 	if err != nil {
 		return nil, err
@@ -2436,14 +2437,23 @@ func RunDockerAutoHealPolicies(environmentID string) ([]DockerAutoHealPolicy, er
 	if err != nil {
 		return nil, err
 	}
-	updated := make([]DockerAutoHealPolicy, 0, len(policies))
+	allPolicies, err := ListDockerAutoHealPolicies("")
+	if err != nil {
+		return nil, err
+	}
+	updatedMap := make(map[string]DockerAutoHealPolicy, len(allPolicies))
+	for _, p := range allPolicies {
+		updatedMap[p.ID] = p
+	}
+
 	for _, policy := range policies {
-		if !policy.Enabled {
-			updated = append(updated, policy)
+		if manualRun && policy.ID != policyID {
 			continue
 		}
-		if !shouldRunPolicy(policy, time.Now().UTC()) {
-			updated = append(updated, policy)
+		if !manualRun && !policy.Enabled {
+			continue
+		}
+		if !manualRun && !shouldRunPolicy(policy, time.Now().UTC()) {
 			continue
 		}
 		outcome := "no_match"
@@ -2452,7 +2462,7 @@ func RunDockerAutoHealPolicies(environmentID string) ([]DockerAutoHealPolicy, er
 				continue
 			}
 			state, health := inspectDockerContainerState(container.Id)
-			if !containerMatchesTrigger(policy.Trigger, state, health) {
+			if !manualRun && !containerMatchesTrigger(policy.Trigger, state, health) {
 				continue
 			}
 			if strings.EqualFold(policy.Action, "restart") {
@@ -2470,6 +2480,7 @@ func RunDockerAutoHealPolicies(environmentID string) ([]DockerAutoHealPolicy, er
 						Metadata: map[string]any{
 							"policy_id": policy.ID,
 							"trigger":   policy.Trigger,
+							"manual":    manualRun,
 						},
 						CreatedAt: time.Now().UTC(),
 					})
@@ -2479,12 +2490,24 @@ func RunDockerAutoHealPolicies(environmentID string) ([]DockerAutoHealPolicy, er
 		policy.LastRunAt = time.Now().UTC()
 		policy.LastOutcome = outcome
 		policy.UpdatedAt = time.Now().UTC()
-		updated = append(updated, policy)
+		updatedMap[policy.ID] = policy
 	}
-	if err := writeDockerAutoHealPolicies(updated); err != nil {
+
+	merged := make([]DockerAutoHealPolicy, 0, len(updatedMap))
+	for _, p := range updatedMap {
+		merged = append(merged, p)
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].CreatedAt.Before(merged[j].CreatedAt) })
+	if err := writeDockerAutoHealPolicies(merged); err != nil {
 		return nil, err
 	}
-	return updated, nil
+	result := make([]DockerAutoHealPolicy, 0, len(policies))
+	for _, p := range merged {
+		if p.EnvironmentID == environmentID {
+			result = append(result, p)
+		}
+	}
+	return result, nil
 }
 
 func RunAllDockerAutoHealPolicies() error {
@@ -2501,7 +2524,7 @@ func RunAllDockerAutoHealPolicies() error {
 			continue
 		}
 		seen[item.EnvironmentID] = struct{}{}
-		if _, err := RunDockerAutoHealPolicies(item.EnvironmentID); err != nil {
+		if _, err := RunDockerAutoHealPolicies(item.EnvironmentID, ""); err != nil {
 			return err
 		}
 	}
@@ -2547,6 +2570,124 @@ func listDockerStackRevisions(name string) ([]DockerStackRevision, error) {
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
 	return items, nil
+}
+
+type DockerDiskUsageObject struct {
+	Type        string `json:"type"`
+	TotalCount  int    `json:"total_count"`
+	ActiveCount int    `json:"active_count"`
+	Size        int64  `json:"size"`
+	Reclaimable int64  `json:"reclaimable"`
+	ReclaimPct  int    `json:"reclaim_pct"`
+}
+
+type DockerDiskUsage struct {
+	LayersSize  int64                   `json:"layers_size"`
+	Images      []DockerDiskUsageObject `json:"images"`
+	Containers  []DockerDiskUsageObject `json:"containers"`
+	Volumes     []DockerDiskUsageObject `json:"volumes"`
+	BuildCache  []DockerDiskUsageObject `json:"build_cache"`
+	TotalSize   int64                   `json:"total_size"`
+	Reclaimable int64                   `json:"reclaimable"`
+	Objects     []DockerDiskUsageObject `json:"objects"`
+}
+
+func GetDockerDiskUsage() (*DockerDiskUsage, error) {
+	output, err := exec.Command("docker", "system", "df", "--format", "{{json .}}").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker system df failed: %s", strings.TrimSpace(string(output)))
+	}
+
+	type rawItem struct {
+		Type        string `json:"Type"`
+		TotalCount  string `json:"TotalCount"`
+		Active      string `json:"Active"`
+		Size        string `json:"Size"`
+		Reclaimable string `json:"Reclaimable"`
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var result DockerDiskUsage
+	var totalSize, reclaimable int64
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var item rawItem
+		if err := json.Unmarshal([]byte(line), &item); err != nil {
+			continue
+		}
+		count := parseDockerDfInt(item.TotalCount)
+		active := parseDockerDfInt(item.Active)
+		size := parseDockerDfBytes(item.Size)
+		reclStr := item.Reclaimable
+		pct := 0
+		if idx := strings.Index(reclStr, "("); idx != -1 && strings.Contains(reclStr, ")") {
+			pctStr := reclStr[idx+1 : strings.Index(reclStr, ")")]
+			pctStr = strings.TrimSuffix(strings.TrimSpace(pctStr), "%")
+			pct = int(parseDockerDfFloat(pctStr))
+			reclStr = strings.TrimSpace(reclStr[:idx])
+		}
+		recl := parseDockerDfBytes(reclStr)
+		obj := DockerDiskUsageObject{
+			Type:        item.Type,
+			TotalCount:  count,
+			ActiveCount: active,
+			Size:        size,
+			Reclaimable: recl,
+			ReclaimPct:  pct,
+		}
+		result.Objects = append(result.Objects, obj)
+		totalSize += size
+		reclaimable += recl
+	}
+
+	result.TotalSize = totalSize
+	result.Reclaimable = reclaimable
+	return &result, nil
+}
+
+func parseDockerDfInt(s string) int {
+	s = strings.TrimSpace(s)
+	var n int
+	fmt.Sscanf(s, "%d", &n)
+	return n
+}
+
+func parseDockerDfFloat(s string) float64 {
+	var f float64
+	fmt.Sscanf(strings.TrimSpace(s), "%f", &f)
+	return f
+}
+
+func parseDockerDfBytes(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "0B" {
+		return 0
+	}
+	suffixes := []struct {
+		suffix     string
+		multiplier int64
+	}{
+		{"TB", 1024 * 1024 * 1024 * 1024},
+		{"GB", 1024 * 1024 * 1024},
+		{"MB", 1024 * 1024},
+		{"kB", 1024},
+		{"KB", 1024},
+		{"B", 1},
+	}
+	for _, su := range suffixes {
+		if strings.HasSuffix(s, su.suffix) {
+			numStr := strings.TrimSuffix(s, su.suffix)
+			var f float64
+			if _, err := fmt.Sscanf(strings.TrimSpace(numStr), "%f", &f); err == nil {
+				return int64(f * float64(su.multiplier))
+			}
+		}
+	}
+	return 0
 }
 
 func writeStackAssets(stackDir, directory string, values map[string]string, mode os.FileMode) error {
