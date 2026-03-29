@@ -35,7 +35,7 @@ import {
     useSaveContainerFile,
 } from "../api/useDockerHooks";
 import type { DockerContainerConfig } from "../types";
-import EditContainerModal from "../components/EditContainerModal";
+
 import DockerTerminalWorkspaceModal, { type DockerTerminalWorkspaceSession } from "../components/DockerTerminalWorkspaceModal";
 import LogViewer from "../components/LogViewer";
 
@@ -88,7 +88,7 @@ export default function ContainerDetailPage() {
     const [activeTab, setActiveTab] = useState("stats");
     const [inspectSection, setInspectSection] = useState<InspectSectionKey>("platform");
     const [showRawInspect, setShowRawInspect] = useState(false);
-    const [isEditOpen, setIsEditOpen] = useState(false);
+
     const [terminalSessions, setTerminalSessions] = useState<DockerTerminalWorkspaceSession[]>([]);
     const [activeTerminalTabId, setActiveTerminalTabId] = useState("");
     const [activeDirectory, setActiveDirectory] = useState("/");
@@ -237,19 +237,71 @@ export default function ContainerDetailPage() {
                     <Button variant="outline" onClick={openTerminalWorkspace}>
                         <SquareTerminal className="mr-2 h-4 w-4" /> Open Terminal
                     </Button>
-                    <Button variant="primary" onClick={() => setIsEditOpen(true)}>Edit Container</Button>
+                    <Button variant="primary" onClick={() => navigate(`/containers/${containerId}/edit?envId=${environmentId}`)}>Edit Container</Button>
                 </div>
             </div>
 
             <Card className="p-6">
                 <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                        <h1 className="text-2xl font-semibold">{data?.name || containerId}</h1>
-                        <div className="mt-2 text-sm text-zinc-500">{data?.image}</div>
+                    <div className="flex-1 min-w-0">
+                        <h1 className="text-2xl font-semibold truncate">{data?.name || containerId}</h1>
+                        <div className="mt-1 text-sm text-zinc-500 font-mono truncate">{data?.image}</div>
+                        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-zinc-500 dark:text-zinc-400">
+                            {(() => {
+                                const inspect = data?.inspect as Record<string, any> | undefined;
+                                const config = inspect?.Config as Record<string, any> | undefined;
+                                const entrypoint: string[] = config?.Entrypoint || [];
+                                const cmd: string[] = config?.Cmd || inspect?.Args || [];
+                                const fullCmd = [...entrypoint, ...cmd].join(' ');
+                                return fullCmd ? (
+                                    <span className="flex items-center gap-1.5 font-mono bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-[11px] max-w-sm truncate" title={fullCmd}>
+                                        <span className="text-zinc-400">$</span>
+                                        {fullCmd.length > 60 ? fullCmd.slice(0, 60) + '…' : fullCmd}
+                                    </span>
+                                ) : null;
+                            })()}
+                            {(() => {
+                                const inspect = data?.inspect as Record<string, any> | undefined;
+                                const created = inspect?.Created as string | undefined;
+                                if (!created) return null;
+                                const d = new Date(created);
+                                const diff = Math.floor((Date.now() - d.getTime()) / 1000);
+                                let ago = '';
+                                if (diff < 60) ago = `${diff}s ago`;
+                                else if (diff < 3600) ago = `${Math.floor(diff / 60)}m ago`;
+                                else if (diff < 86400) ago = `${Math.floor(diff / 3600)}h ago`;
+                                else ago = `${Math.floor(diff / 86400)}d ago`;
+                                return <span title={d.toLocaleString()}>Created {ago}</span>;
+                            })()}
+                            {(() => {
+                                const inspect = data?.inspect as Record<string, any> | undefined;
+                                const hostConfig = inspect?.HostConfig as Record<string, any> | undefined;
+                                const portBindings = hostConfig?.PortBindings as Record<string, Array<{ HostIp?: string; HostPort?: string }>> | undefined;
+                                if (!portBindings) return null;
+                                const ports = Object.entries(portBindings).flatMap(([containerPort, bindings]) =>
+                                    (bindings || []).map(b => {
+                                        const ip = b.HostIp || '0.0.0.0';
+                                        const hostPort = b.HostPort;
+                                        return hostPort ? `${ip}:${hostPort}->${containerPort}` : containerPort;
+                                    })
+                                ).slice(0, 4);
+                                if (ports.length === 0) return null;
+                                return (
+                                    <div className="flex flex-wrap gap-1">
+                                        {ports.map((p, i) => (
+                                            <span key={i} className="font-mono bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-[11px]">{p}</span>
+                                        ))}
+                                    </div>
+                                );
+                            })()}
+                        </div>
                     </div>
-                    <div className="flex gap-2">
-                        <Badge variant={data?.state === "running" ? "success" : "warning"}>{data?.state || "unknown"}</Badge>
-                        {data?.health_status ? <Badge variant={data.health_status === "healthy" ? "success" : "warning"}>{data.health_status}</Badge> : null}
+                    <div className="flex flex-wrap gap-2 items-start">
+                        <div className="flex items-center gap-1.5">
+                            <div className={`h-2 w-2 rounded-full ${data?.state === 'running' ? 'bg-emerald-500 animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.5)]' : 'bg-zinc-400'}`} />
+                            <span className={`text-sm font-medium capitalize ${data?.state === 'running' ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-500'}`}>{data?.state || 'unknown'}</span>
+                        </div>
+                        {data?.health_status ? <Badge variant={data.health_status === 'healthy' ? 'success' : 'warning'}>{data.health_status}</Badge> : null}
                         <Badge variant="outline">logs {liveLogs.status}</Badge>
                         <Badge variant="outline">stats {liveStats.status}</Badge>
                     </div>
@@ -491,7 +543,7 @@ export default function ContainerDetailPage() {
                 </div>
             </Card>
 
-            <EditContainerModal isOpen={isEditOpen} onClose={() => setIsEditOpen(false)} environmentId={environmentId} containerId={containerId} />
+
             <DockerTerminalWorkspaceModal
                 isOpen={terminalSessions.length > 0}
                 onClose={() => {
@@ -501,14 +553,29 @@ export default function ContainerDetailPage() {
                 sessions={terminalSessions}
                 activeTabId={activeTerminalTabId}
                 onActivateTab={setActiveTerminalTabId}
-                onCloseTab={() => {
-                    setTerminalSessions([]);
-                    setActiveTerminalTabId("");
+                onCloseTab={(tabId) => {
+                    setTerminalSessions((current) => {
+                        const filtered = current.filter((item) => item.tabId !== tabId);
+                        if (activeTerminalTabId === tabId) {
+                            setActiveTerminalTabId(filtered[0]?.tabId || "");
+                        }
+                        return filtered;
+                    });
                 }}
                 onUpdateSession={(tabId, patch) => {
                     setTerminalSessions((current) =>
                         current.map((item) => (item.tabId === tabId ? { ...item, ...patch } : item)),
                     );
+                }}
+                onAddTab={(cId, cName, envId) => {
+                    const next: DockerTerminalWorkspaceSession = {
+                        tabId: `detail-${Date.now()}`,
+                        containerId: cId,
+                        containerName: cName,
+                        environmentId: envId,
+                    };
+                    setTerminalSessions((current) => [...current, next]);
+                    setActiveTerminalTabId(next.tabId);
                 }}
             />
         </div>
