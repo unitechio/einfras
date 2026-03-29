@@ -190,6 +190,7 @@ export default function ImagesPage() {
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Repository / Tag</TableHead>
+                                        <TableHead>Status</TableHead>
                                         <TableHead>Size</TableHead>
                                         <TableHead>Created</TableHead>
                                         <TableHead className="text-right">Actions</TableHead>
@@ -229,6 +230,21 @@ export default function ImagesPage() {
                                                             );
                                                         }) || <span className="text-zinc-500 dark:text-zinc-400 font-mono">&lt;none&gt;:&lt;none&gt;</span>}
                                                     </div>
+                                                </TableCell>
+                                                <TableCell>
+                                                    {(() => {
+                                                        const tags = img.RepoTags || [];
+                                                        const isUsed = tags.length > 0 && !tags.every(t => t === '<none>:<none>');
+                                                        const isDangling = tags.length === 0 || tags.every(t => t === '<none>:<none>');
+                                                        return (
+                                                            <div className="flex items-center gap-1.5">
+                                                                <div className={`h-2 w-2 rounded-full ${isDangling ? 'bg-zinc-400' : 'bg-emerald-500'}`} />
+                                                                <span className={`text-[12px] font-medium ${isDangling ? 'text-zinc-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                                                                    {isDangling ? 'Dangling' : 'Tagged'}
+                                                                </span>
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </TableCell>
                                                 <TableCell className="text-zinc-600 dark:text-zinc-400 font-mono text-xs">
                                                     {formatSize(img.Size)}
