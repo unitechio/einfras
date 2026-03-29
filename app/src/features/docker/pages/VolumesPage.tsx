@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Search, HardDrive, Server, Plus, Trash2, Database, Pencil, FolderTree, CheckCircle2 } from "lucide-react";
+import { Search, HardDrive, Server, Plus, Trash2, Database, Pencil, FolderTree } from "lucide-react";
 import { useDeleteVolume, useDockerTopology, useSaveVolume, useVolumes } from "../api/useDockerHooks";
 import { useEnvironmentInventory } from "../../kubernetes/api/useEnvironmentInventory";
 import { useEnvironment } from "@/core/EnvironmentContext";
@@ -278,10 +278,17 @@ export default function VolumesPage() {
                                             </Link>
                                         </TableCell>
                                         <TableCell>
-                                            <Badge variant="outline" className="gap-1">
-                                                <CheckCircle2 className="h-3 w-3" />
-                                                Active
-                                            </Badge>
+                                            {(() => {
+                                                const inUse = getVolumeUsage(topology, volume.Name).containers.length > 0;
+                                                return (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <div className={`h-2 w-2 rounded-full ${inUse ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]' : 'bg-zinc-300 dark:bg-zinc-600'}`} />
+                                                        <span className={`text-[12px] font-medium ${inUse ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400 dark:text-zinc-500'}`}>
+                                                            {inUse ? 'In Use' : 'Idle'}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })()}
                                         </TableCell>
                                         <TableCell>
                                             <Badge variant="outline" className="text-xs tracking-wide">
