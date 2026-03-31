@@ -734,10 +734,10 @@ func StreamReaderLines(reader io.Reader, callback func(string) error) error {
 
 func defaultDockerShellCandidates() []string {
 	return []string{
-		"sh",
-		"/bin/sh",
 		"bash",
 		"/bin/bash",
+		"sh",
+		"/bin/sh",
 		"ash",
 		"/bin/ash",
 		"busybox",
@@ -2696,6 +2696,15 @@ func GetDockerDiskUsage() (*DockerDiskUsage, error) {
 	result.TotalSize = totalSize
 	result.Reclaimable = reclaimable
 	return &result, nil
+}
+
+func PruneDockerSystem() error {
+	cmd := exec.Command("docker", "system", "prune", "-a", "--volumes", "-f")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker system prune failed: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func parseDockerDfInt(s string) int {

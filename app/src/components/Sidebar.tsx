@@ -240,6 +240,7 @@ export default function Sidebar() {
           { icon: Box, label: "Build & Import", path: "/images/build" },
           { icon: Share2, label: "Networks", path: "/networks" },
           { icon: HardDrive, label: "Volumes", path: "/volumes" },
+          { icon: HardDrive, label: "Disk Usage", path: "/disk-usage" },
           { icon: Globe, label: "Events", path: "/events" },
         ];
 
@@ -303,7 +304,7 @@ export default function Sidebar() {
       </nav>
 
       {/* FOOTER */}
-      <div className="p-3 border-t border-zinc-200/50 dark:border-white/5">
+      {/*<div className="p-3 border-t border-zinc-200/50 dark:border-white/5">
         <div className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-white/5 transition cursor-pointer">
           <div className="w-7 h-7 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold">
             AD
@@ -317,7 +318,7 @@ export default function Sidebar() {
             </div>
           )}
         </div>
-      </div>
+      </div>*/}
     </aside>
   );
 }

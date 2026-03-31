@@ -611,6 +611,11 @@ func isPublicPath(path string) bool {
 		strings.HasPrefix(path, "/v1/auth/mfa/reset/"),
 		strings.HasPrefix(path, "/v1/public/login-config"):
 		return true
+	// Agent onboarding endpoints — must be public so curl | bash works without credentials
+	case path == "/install.sh",
+		strings.HasPrefix(path, "/v1/agent/binary"),
+		strings.HasPrefix(path, "/v1/agent/manifest"):
+		return true
 	default:
 		return false
 	}

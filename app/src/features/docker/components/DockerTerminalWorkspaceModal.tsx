@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
-  ClipboardCopy,
+  Copy,
   ClipboardPaste,
   Maximize2,
   Minimize2,
@@ -29,6 +29,7 @@ export type DockerTerminalWorkspaceSession = {
   containerId: string;
   environmentId: string;
   sessionId?: string;
+  status?: "connecting" | "connected" | "closed" | "error" | "fallback";
 };
 
 type DockerTerminalWorkspaceModalProps = {
@@ -42,6 +43,7 @@ type DockerTerminalWorkspaceModalProps = {
     tabId: string,
     patch: Partial<DockerTerminalWorkspaceSession>,
   ) => void;
+  onAddTab?: (containerId: string, containerName: string, environmentId: string) => void;
 };
 
 type ConnectionState =
@@ -126,6 +128,7 @@ export default function DockerTerminalWorkspaceModal({
   onActivateTab,
   onCloseTab,
   onUpdateSession,
+  onAddTab,
 }: DockerTerminalWorkspaceModalProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -171,11 +174,10 @@ export default function DockerTerminalWorkspaceModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
       <div
-        className={`flex flex-col overflow-hidden shadow-2xl transition-all duration-300 border border-white/5 ${
-          isMaximized
-            ? "absolute inset-0 rounded-none"
-            : "h-[82vh] w-full max-w-7xl rounded-2xl"
-        }`}
+        className={`flex flex-col overflow-hidden shadow-2xl transition-all duration-300 border border-white/5 ${isMaximized
+          ? "absolute inset-0 rounded-none"
+          : "h-[82vh] w-full max-w-7xl rounded-2xl"
+          }`}
         style={{ background: "linear-gradient(180deg, #0f0f12 0%, #0a0a0d 100%)" }}
       >
         {/* ── Titlebar ── */}
@@ -213,16 +215,21 @@ export default function DockerTerminalWorkspaceModal({
               return (
                 <div
                   key={session.tabId}
-                  className={`group relative inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-all cursor-pointer ${
-                    isActive
-                      ? "bg-[#1e1e2e] border border-blue-500/30 text-blue-100 shadow-[0_0_0_1px_rgba(59,130,246,0.15)]"
-                      : "border border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
-                  }`}
+                  className={`group relative inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-all cursor-pointer ${isActive
+                    ? "bg-[#1e1e2e] border border-blue-500/30 text-blue-100 shadow-[0_0_0_1px_rgba(59,130,246,0.15)]"
+                    : "border border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
+                    }`}
                 >
-                  {/* green dot for connected, amber for connecting */}
+                  {/* status dot */}
                   <span
                     className={`h-1.5 w-1.5 rounded-full shrink-0 ${
-                      session.sessionId ? "bg-emerald-400" : "bg-zinc-600"
+                      session.status === "connected" || session.status === "fallback" || (!session.status && session.sessionId)
+                        ? "bg-emerald-400"
+                        : session.status === "connecting"
+                          ? "bg-amber-400 animate-pulse"
+                          : session.status === "error"
+                            ? "bg-red-500"
+                            : "bg-zinc-600"
                     }`}
                   />
                   <button
@@ -239,17 +246,26 @@ export default function DockerTerminalWorkspaceModal({
                       e.stopPropagation();
                       onCloseTab(session.tabId);
                     }}
-                    className={`ml-0.5 flex-shrink-0 rounded p-0.5 transition-opacity ${
-                      isActive
-                        ? "opacity-60 hover:opacity-100 hover:bg-white/10"
-                        : "opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:bg-white/10"
-                    }`}
+                    className={`ml-0.5 flex-shrink-0 rounded p-0.5 transition-opacity ${isActive
+                      ? "opacity-60 hover:opacity-100 hover:bg-white/10"
+                      : "opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:bg-white/10"
+                      }`}
                   >
                     <X className="h-2.5 w-2.5" />
                   </button>
                 </div>
               );
             })}
+            {onAddTab && (
+               <button
+                 key="add-tab"
+                 onClick={() => onAddTab(activeSession.containerId, activeSession.containerName, activeSession.environmentId)}
+                 className="flex items-center gap-1 px-2 py-1.5 mx-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-colors shrink-0 text-[11px]"
+                 title="New session"
+               >
+                 <Plus size={14} />
+               </button>
+            )}
           </div>
 
           {/* scroll right */}
@@ -283,17 +299,25 @@ export default function DockerTerminalWorkspaceModal({
           </div>
         </div>
 
-        {/* ── Terminal pane ── */}
-        <div className="relative flex-1 min-h-0">
-          <div key={activeSession.tabId} className="h-full w-full">
-            <DockerTerminalPane
-              session={activeSession}
-              active
-              onUpdateSession={(patch) =>
-                onUpdateSession(activeSession.tabId, patch)
-              }
-            />
-          </div>
+        {/* ── Terminal panes ── */}
+        <div className="relative flex-1 min-h-0 bg-[#0a0a0d]">
+          {sessions.map((sess) => {
+            const isActive = activeSession.tabId === sess.tabId;
+            return (
+              <div
+                key={sess.tabId}
+                className={`absolute inset-0 transition-opacity duration-200 ${
+                  isActive ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
+                }`}
+              >
+                <DockerTerminalPane
+                  session={sess}
+                  active={isActive}
+                  onUpdateSession={(patch) => onUpdateSession(sess.tabId, patch)}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -341,6 +365,10 @@ function DockerTerminalPane({
   showNotifRef.current = showNotification;
   const onUpdateSessionRef = useRef(onUpdateSession);
   onUpdateSessionRef.current = onUpdateSession;
+
+  useEffect(() => {
+    onUpdateSessionRef.current({ status: connectionStatus });
+  }, [connectionStatus]);
 
   // ── xterm init ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -397,23 +425,6 @@ function DockerTerminalPane({
         void navigator.clipboard?.writeText(term.getSelection());
         return false;
       }
-      if (isMod && event.key.toLowerCase() === "v") {
-        void navigator.clipboard?.readText().then((text) => {
-          if (!text) return;
-          if (fallbackModeRef.current) {
-            // insert at cursor
-            const buf = fallbackBufferRef.current;
-            const cur = fallbackCursorRef.current;
-            fallbackBufferRef.current = buf.slice(0, cur) + text + buf.slice(cur);
-            fallbackCursorRef.current = cur + text.length;
-            // redraw from cursor
-            _redrawFromCursor(term);
-          } else {
-            socketRef.current?.send(JSON.stringify({ type: "input", data: text }));
-          }
-        });
-        return false;
-      }
       return true;
     });
 
@@ -433,7 +444,9 @@ function DockerTerminalPane({
     if (!active) return;
     const t = window.setTimeout(() => {
       safeFit(terminalRef.current, fitAddonRef.current);
-      xtermRef.current?.focus();
+      if (terminalRef.current && terminalRef.current.clientWidth > 0) {
+         try { xtermRef.current?.focus(); } catch { /* ignore */ }
+      }
       const d = safeProposeDimensions(terminalRef.current, fitAddonRef.current);
       if (socketRef.current?.readyState === WebSocket.OPEN && d) {
         socketRef.current.send(
@@ -453,6 +466,17 @@ function DockerTerminalPane({
     let disposed = false;
     let established = false;
     let receivedOutput = false;
+
+    const safeTermWrite = (text: string) => {
+      if (disposed || !term) return;
+      try {
+        term.write(text);
+      } catch { /* noop */ }
+    };
+    const safeTermWriteln = (text: string) => {
+      if (disposed || !term) return;
+      try { term.writeln(text); } catch { /* noop */ }
+    };
 
     // Reset fallback state on new connection
     fallbackModeRef.current = false;
@@ -477,7 +501,7 @@ function DockerTerminalPane({
         `\x1b[38;5;75m${id}\x1b[0m` +
         `\x1b[90m:\x1b[0m` +
         `\x1b[38;5;117m${cwd}\x1b[0m` +
-        `\x1b[${user === "root" ? "31" : "32"}m${sym}\x1b[0m ` 
+        `\x1b[${user === "root" ? "31" : "32"}m${sym}\x1b[0m `
       );
     };
 
@@ -485,7 +509,7 @@ function DockerTerminalPane({
       fallbackBufferRef.current = "";
       fallbackCursorRef.current = 0;
       tabCompleteRef.current = null;
-      term.write(buildPrompt());
+      safeTermWrite(buildPrompt());
     };
 
     const sendResize = () => {
@@ -545,27 +569,27 @@ function DockerTerminalPane({
           tabCompleteRef.current = null;
         } else {
           // Show suggestions below current line
-          term.write("\r\n");
-          const cols = term.cols;
+          safeTermWrite("\r\n");
+          const cols = term.cols || 80;
           let line = "";
           for (const opt of options) {
             const piece = opt.padEnd(20).slice(0, 20) + "  ";
             if (line.length + piece.length > cols) {
-              term.write("\x1b[90m" + line + "\x1b[0m\r\n");
+              safeTermWrite("\x1b[90m" + line + "\x1b[0m\r\n");
               line = piece;
             } else {
               line += piece;
             }
           }
-          if (line) term.write("\x1b[90m" + line + "\x1b[0m\r\n");
+          if (line) safeTermWrite("\x1b[90m" + line + "\x1b[0m\r\n");
           tabCompleteRef.current = { prefix, options, cursor: 0 };
           // Re-draw prompt + current buffer
-          term.write(buildPrompt());
-          term.write(buf);
+          safeTermWrite(buildPrompt());
+          safeTermWrite(buf);
           // Move cursor back if needed
           const tail = buf.slice(cur);
           if (tail.length > 0) {
-            term.write(`\x1b[${tail.length}D`);
+            safeTermWrite(`\x1b[${tail.length}D`);
           }
         }
       } catch {
@@ -579,12 +603,12 @@ function DockerTerminalPane({
 
       // Built-in: clear — must happen BEFORE the \r\n so no stray blank line
       if (cmd === "clear" || cmd === "cls") {
-        term.clear();
+        safeTermWrite("\x1bc"); // full reset screen
         writePrompt();
         return;
       }
 
-      term.write("\r\n");
+      safeTermWrite("\r\n");
 
       if (!cmd) {
         writePrompt();
@@ -623,7 +647,9 @@ function DockerTerminalPane({
           if (resolved.startsWith("/")) shellCwdRef.current = resolved;
         } else {
           const SENTINEL = "__EINFRA_CWD__";
-          const fullCmd = `${termEnv} cd '${cwd}' 2>/dev/null; ${cmd}; printf '\\n${SENTINEL}:%s' "$(pwd)"`;
+          const proxyLs = `ls() { command ls -C --color=auto "$@" 2>/dev/null || command ls -C "$@" 2>/dev/null || command ls "$@"; };`;
+          const EnvCols = `export COLUMNS=${term.cols} LINES=${term.rows} TERM=xterm-256color;`;
+          const fullCmd = `${termEnv} ${EnvCols} ${proxyLs} cd '${cwd}' 2>/dev/null; ${cmd}; printf '\\n${SENTINEL}:%s' "$(pwd)"`;
           const raw = await execShell(session.environmentId, session.containerId, fullCmd);
 
           const idx = raw.lastIndexOf(`\n${SENTINEL}:`);
@@ -636,12 +662,12 @@ function DockerTerminalPane({
 
           if (output) {
             const normalized = output.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-            term.write(normalized.replace(/\n/g, "\r\n"));
-            if (!normalized.endsWith("\n") && normalized.length > 0) term.write("\r\n");
+            safeTermWrite(normalized.replace(/\n/g, "\r\n"));
+            if (!normalized.endsWith("\n") && normalized.length > 0) safeTermWrite("\r\n");
           }
         }
       } catch (err) {
-        term.write(
+        safeTermWrite(
           `\x1b[31m${err instanceof Error ? err.message : "error"}\x1b[0m\r\n`,
         );
       } finally {
@@ -657,11 +683,11 @@ function DockerTerminalPane({
       established = true;
       setConnectionStatus("fallback");
 
-      term.writeln("");
+      safeTermWriteln("");
       if (reason) {
-        term.writeln(`\x1b[33m${reason}\x1b[0m`);
+        safeTermWriteln(`\x1b[33m${reason}\x1b[0m`);
       }
-      term.writeln(
+      safeTermWriteln(
         "\x1b[90mFallback command mode  ·  ↑↓ history  ·  Tab complete  ·  Ctrl+C cancel\x1b[0m",
       );
 
@@ -689,7 +715,7 @@ function DockerTerminalPane({
       term.clear();
     } catch { /* noop */ }
 
-    term.writeln(
+    safeTermWriteln(
       `\x1b[90mConnecting to \x1b[0m\x1b[1m${session.containerName}\x1b[0m \x1b[90m(${session.containerId.substring(0, 12)})…\x1b[0m`,
     );
     setConnectionStatus("connecting");
@@ -712,7 +738,7 @@ function DockerTerminalPane({
       established = true;
       setConnectionStatus("connected");
       window.clearTimeout(connectionTimeout);
-      term.writeln("\x1b[32mInteractive shell connected.\x1b[0m");
+      safeTermWriteln("\x1b[32mInteractive shell connected.\x1b[0m");
       socket.send(JSON.stringify({ type: "input", data: "\n" }));
       sendResize();
     };
@@ -832,10 +858,10 @@ function DockerTerminalPane({
             fallbackBufferRef.current = buf.slice(0, cur - 1) + buf.slice(cur);
             fallbackCursorRef.current = cur - 1;
             // Move cursor left, delete char, shift right portion left
-            term.write("\b");
+            safeTermWrite("\b");
             const tail = fallbackBufferRef.current.slice(fallbackCursorRef.current);
-            term.write(tail + " ");
-            if (tail.length + 1 > 0) term.write(`\x1b[${tail.length + 1}D`);
+            safeTermWrite(tail + " ");
+            if (tail.length + 1 > 0) safeTermWrite(`\x1b[${tail.length + 1}D`);
           }
           return;
         }
@@ -847,8 +873,8 @@ function DockerTerminalPane({
           if (cur < buf.length) {
             fallbackBufferRef.current = buf.slice(0, cur) + buf.slice(cur + 1);
             const tail = fallbackBufferRef.current.slice(cur);
-            term.write(tail + " ");
-            if (tail.length + 1 > 0) term.write(`\x1b[${tail.length + 1}D`);
+            safeTermWrite(tail + " ");
+            if (tail.length + 1 > 0) safeTermWrite(`\x1b[${tail.length + 1}D`);
           }
           return;
         }
@@ -857,7 +883,7 @@ function DockerTerminalPane({
         if (data === "\x1b[D") {
           if (fallbackCursorRef.current > 0) {
             fallbackCursorRef.current--;
-            term.write("\x1b[D");
+            safeTermWrite("\x1b[D");
           }
           return;
         }
@@ -866,7 +892,7 @@ function DockerTerminalPane({
         if (data === "\x1b[C") {
           if (fallbackCursorRef.current < fallbackBufferRef.current.length) {
             fallbackCursorRef.current++;
-            term.write("\x1b[C");
+            safeTermWrite("\x1b[C");
           }
           return;
         }
@@ -875,7 +901,7 @@ function DockerTerminalPane({
         if (data === "\x1b[H" || data === "\x01") {
           const n = fallbackCursorRef.current;
           if (n > 0) {
-            term.write(`\x1b[${n}D`);
+            safeTermWrite(`\x1b[${n}D`);
             fallbackCursorRef.current = 0;
           }
           return;
@@ -885,7 +911,7 @@ function DockerTerminalPane({
         if (data === "\x1b[F" || data === "\x05") {
           const remaining = fallbackBufferRef.current.length - fallbackCursorRef.current;
           if (remaining > 0) {
-            term.write(`\x1b[${remaining}C`);
+            safeTermWrite(`\x1b[${remaining}C`);
             fallbackCursorRef.current = fallbackBufferRef.current.length;
           }
           return;
@@ -900,7 +926,7 @@ function DockerTerminalPane({
           }
           const newIdx = Math.min(historyIdxRef.current + 1, hist.length - 1);
           historyIdxRef.current = newIdx;
-          _setBuffer(term, hist[newIdx], hist[newIdx].length);
+          _setBuffer(term, hist[newIdx], hist[newIdx].length, buildPrompt());
           return;
         }
 
@@ -910,7 +936,7 @@ function DockerTerminalPane({
           const newIdx = historyIdxRef.current - 1;
           historyIdxRef.current = newIdx;
           const text = newIdx === -1 ? historySavedCurrentRef.current : historyRef.current[newIdx];
-          _setBuffer(term, text, text.length);
+          _setBuffer(term, text, text.length, buildPrompt());
           return;
         }
 
@@ -1018,18 +1044,23 @@ function DockerTerminalPane({
 
   // ── Helpers for buffer manipulation ───────────────────────────────────────
   /** Replace current line buffer and move cursor */
-  function _setBuffer(term: Terminal, newBuf: string, newCur: number) {
-    const oldBuf = fallbackBufferRef.current;
-    const oldCur = fallbackCursorRef.current;
-    // Move to start of old buffer
-    if (oldCur > 0) term.write(`\x1b[${oldCur}D`);
-    // Over-write with new buffer + erase remainder
-    term.write(newBuf);
-    const overflow = oldBuf.length - newBuf.length;
-    if (overflow > 0) term.write(" ".repeat(overflow) + `\x1b[${overflow}D`);
-    // Move cursor if not at end
-    const tailLen = newBuf.length - newCur;
-    if (tailLen > 0) term.write(`\x1b[${tailLen}D`);
+  function _setBuffer(term: Terminal, newBuf: string, newCur: number, promptStr?: string) {
+    if (promptStr) {
+       term.write("\x1b[2K\r"); // wipe entire current row
+       term.write(promptStr); // redraw prompt
+       term.write(newBuf); // write buffer
+       const tailLen = newBuf.length - newCur;
+       if (tailLen > 0) term.write(`\x1b[${tailLen}D`);
+    } else {
+       const oldBuf = fallbackBufferRef.current;
+       const oldCur = fallbackCursorRef.current;
+       if (oldCur > 0) term.write(`\x1b[${oldCur}D`);
+       term.write(newBuf);
+       const overflow = oldBuf.length - newBuf.length;
+       if (overflow > 0) term.write(" ".repeat(overflow) + `\x1b[${overflow}D`);
+       const tailLen = newBuf.length - newCur;
+       if (tailLen > 0) term.write(`\x1b[${tailLen}D`);
+    }
     fallbackBufferRef.current = newBuf;
     fallbackCursorRef.current = newCur;
   }
@@ -1110,7 +1141,7 @@ function DockerTerminalPane({
             className="rounded-md border border-white/5 bg-white/[0.03] p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-white/8 transition-colors"
             title="Copy selection (Ctrl+C)"
           >
-            <ClipboardCopy className="h-3 w-3" />
+            <Copy className="h-3 w-3" />
           </button>
           <button
             type="button"

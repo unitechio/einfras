@@ -1,11 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, Plus, Rocket, Sparkles, Trash2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Plus,
+  Rocket,
+  Sparkles,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/Tabs";
 import { Badge } from "@/shared/ui/Badge";
 import { useNotification } from "@/core/NotificationContext";
-import { useCreateContainer, useDeployStack, useDockerSwarmStatus } from "../api/useDockerHooks";
+import {
+  useCreateContainer,
+  useDeployStack,
+  useDockerSwarmStatus,
+} from "../api/useDockerHooks";
 import { useRegistries } from "@/features/repositories/api/useRepositories";
 import { tagsApi } from "@/features/catalog/api";
 import { useRuntimeFeatureFlags } from "@/features/settings/useRuntimeFeatureFlags";
@@ -18,7 +31,11 @@ import {
 } from "../runtime-image-presets";
 
 type KeyValueRow = { key: string; value: string };
-type PortRow = { hostPort: string; containerPort: string; protocol: "tcp" | "udp" };
+type PortRow = {
+  hostPort: string;
+  containerPort: string;
+  protocol: "tcp" | "udp";
+};
 type VolumeRow = {
   source: string;
   target: string;
@@ -62,8 +79,17 @@ interface DeployContainerModalProps {
 }
 
 const emptyEnv = (): KeyValueRow => ({ key: "", value: "" });
-const emptyPort = (): PortRow => ({ hostPort: "", containerPort: "", protocol: "tcp" });
-const emptyVolume = (): VolumeRow => ({ source: "", target: "", mode: "rw", sourceType: "named" });
+const emptyPort = (): PortRow => ({
+  hostPort: "",
+  containerPort: "",
+  protocol: "tcp",
+});
+const emptyVolume = (): VolumeRow => ({
+  source: "",
+  target: "",
+  mode: "rw",
+  sourceType: "named",
+});
 const createService = (
   name = "app",
   image = "nginx:stable-alpine",
@@ -222,21 +248,21 @@ const buildComposeYaml = (
       );
       if (service.dependsOn.length) {
         lines.push("    depends_on:");
-        service.dependsOn.filter((dependency) => dependency.trim()).forEach((dependency) =>
-          lines.push(`      - ${dependency}`),
-        );
+        service.dependsOn
+          .filter((dependency) => dependency.trim())
+          .forEach((dependency) => lines.push(`      - ${dependency}`));
       }
       if (service.secretRefs.filter((item) => item.trim()).length) {
         lines.push("    secrets:");
-        service.secretRefs.filter((item) => item.trim()).forEach((secret) =>
-          lines.push(`      - ${secret}`),
-        );
+        service.secretRefs
+          .filter((item) => item.trim())
+          .forEach((secret) => lines.push(`      - ${secret}`));
       }
       if (service.configRefs.filter((item) => item.trim()).length) {
         lines.push("    configs:");
-        service.configRefs.filter((item) => item.trim()).forEach((config) =>
-          lines.push(`      - ${config}`),
-        );
+        service.configRefs
+          .filter((item) => item.trim())
+          .forEach((config) => lines.push(`      - ${config}`));
       }
       const needsDeployBlock =
         service.memoryLimit.trim() ||
@@ -292,13 +318,19 @@ const buildComposeYaml = (
   const volumeBlock = normalizedVolumes.length
     ? `\nvolumes:\n${normalizedVolumes.map((volume) => `  ${volume}:`).join("\n")}`
     : "";
-  const composeNetworks = Array.from(new Set([...normalizedNetworks, defaultNetwork]));
+  const composeNetworks = Array.from(
+    new Set([...normalizedNetworks, defaultNetwork]),
+  );
   const networkBlock = `\nnetworks:\n${composeNetworks.map((network) => `  ${network}:\n    driver: bridge`).join("\n")}`;
   const secretsBlock = Object.keys(sharedSecrets).length
-    ? `\nsecrets:\n${Object.keys(sharedSecrets).map((secret) => `  ${secret}:\n    external: false`).join("\n")}`
+    ? `\nsecrets:\n${Object.keys(sharedSecrets)
+        .map((secret) => `  ${secret}:\n    external: false`)
+        .join("\n")}`
     : "";
   const configsBlock = Object.keys(sharedConfigs).length
-    ? `\nconfigs:\n${Object.keys(sharedConfigs).map((config) => `  ${config}:\n    external: false`).join("\n")}`
+    ? `\nconfigs:\n${Object.keys(sharedConfigs)
+        .map((config) => `  ${config}:\n    external: false`)
+        .join("\n")}`
     : "";
   return `services:\n${servicesBlock}${volumeBlock}${networkBlock}${secretsBlock}${configsBlock}`;
 };
@@ -446,7 +478,7 @@ function RowEditor({
           {title}
         </label>
       </div>
-      <div className="space-y-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/30">
+      <div className="space-y-3 rounded-2xl border border-zinc-200/60 bg-zinc-50/50 p-4 dark:border-white/5 dark:bg-zinc-950/20">
         {rows.map((row: any, index) => (
           <div
             key={`${title}-${index}`}
@@ -470,8 +502,7 @@ function RowEditor({
                               ? "key"
                               : row.hostPort !== undefined
                                 ? "hostPort"
-                                : "source"]:
-                              event.target.value,
+                                : "source"]: event.target.value,
                           }
                         : item,
                     ),
@@ -498,8 +529,7 @@ function RowEditor({
                               ? "value"
                               : row.containerPort !== undefined
                                 ? "containerPort"
-                                : "target"]:
-                              event.target.value,
+                                : "target"]: event.target.value,
                           }
                         : item,
                     ),
@@ -591,7 +621,9 @@ export default function DeployContainerModal({
   const [envRows, setEnvRows] = useState<KeyValueRow[]>([emptyEnv()]);
   const [portRows, setPortRows] = useState<PortRow[]>([emptyPort()]);
   const [volumeRows, setVolumeRows] = useState<VolumeRow[]>([emptyVolume()]);
-  const [restartPolicy, setRestartPolicy] = useState<"no" | "always" | "unless-stopped" | "on-failure">("unless-stopped");
+  const [restartPolicy, setRestartPolicy] = useState<
+    "no" | "always" | "unless-stopped" | "on-failure"
+  >("unless-stopped");
   const [registryId, setRegistryId] = useState("");
   const [containerName, setContainerName] = useState("");
   const [memoryLimit, setMemoryLimit] = useState("");
@@ -605,8 +637,12 @@ export default function DeployContainerModal({
   const [healthcheckDisabled, setHealthcheckDisabled] = useState(false);
   const [stackName, setStackName] = useState("app-stack");
   const [stackEnvRows, setStackEnvRows] = useState<KeyValueRow[]>([emptyEnv()]);
-  const [stackSecretRows, setStackSecretRows] = useState<KeyValueRow[]>([emptyEnv()]);
-  const [stackConfigRows, setStackConfigRows] = useState<KeyValueRow[]>([emptyEnv()]);
+  const [stackSecretRows, setStackSecretRows] = useState<KeyValueRow[]>([
+    emptyEnv(),
+  ]);
+  const [stackConfigRows, setStackConfigRows] = useState<KeyValueRow[]>([
+    emptyEnv(),
+  ]);
   const [namedVolumes, setNamedVolumes] = useState<string[]>(["app-data"]);
   const [namedNetworks, setNamedNetworks] = useState<string[]>(["app-network"]);
   const [services, setServices] = useState<ServiceDraft[]>([
@@ -634,9 +670,16 @@ export default function DeployContainerModal({
   );
 
   const singlePreset = useMemo(() => getImageDeployPreset(image), [image]);
-  const singlePortSuggestions = useMemo(() => getSuggestedPortMappings(image), [image]);
+  const singlePortSuggestions = useMemo(
+    () => getSuggestedPortMappings(image),
+    [image],
+  );
   const singleVolumeWarnings = useMemo(
-    () => getVolumeTargetWarnings(image, volumeRows.map((row) => row.target)),
+    () =>
+      getVolumeTargetWarnings(
+        image,
+        volumeRows.map((row) => row.target),
+      ),
     [image, volumeRows],
   );
   const singleEnvWarnings = useMemo(
@@ -662,33 +705,38 @@ export default function DeployContainerModal({
     );
   }, [services]);
   const composeWarnings = useMemo(
-    () =>
-      [
-        ...services.flatMap((service) => [
-          ...getVolumeTargetWarnings(
-            service.image,
-            service.volumes.map((row) => row.target),
-          ).map((warning) => `${service.name || "service"}: ${warning}`),
-          ...getRequiredEnvWarnings(service.image, {
-            ...toRecord(stackEnvRows),
-            ...toRecord(service.env),
-          }).map((warning) => `${service.name || "service"}: ${warning}`),
-          ...(!service.networks.map((item) => item.trim()).filter(Boolean).length
-            ? [`${service.name || "service"}: no network selected, default will be attached automatically.`]
-            : []),
-          ...(service.containerName.trim()
-            ? [`${service.name || "service"}: container_name is ignored for swarm stack deploy and will not be applied.`]
-            : []),
-          ...(service.restartPolicy === "unless-stopped"
-            ? [`${service.name || "service"}: unless-stopped is converted to swarm restart policy 'any'.`]
-            : []),
-        ]),
-        ...(swarmStatus && !swarmStatus.is_manager
+    () => [
+      ...services.flatMap((service) => [
+        ...getVolumeTargetWarnings(
+          service.image,
+          service.volumes.map((row) => row.target),
+        ).map((warning) => `${service.name || "service"}: ${warning}`),
+        ...getRequiredEnvWarnings(service.image, {
+          ...toRecord(stackEnvRows),
+          ...toRecord(service.env),
+        }).map((warning) => `${service.name || "service"}: ${warning}`),
+        ...(!service.networks.map((item) => item.trim()).filter(Boolean).length
           ? [
-              `This Docker environment is not a Swarm manager (${swarmStatus.local_node_state || "inactive"}). The runtime will fall back to docker compose up -d for this deploy.`,
+              `${service.name || "service"}: no network selected, default will be attached automatically.`,
             ]
           : []),
-      ],
+        ...(service.containerName.trim()
+          ? [
+              `${service.name || "service"}: container_name is ignored for swarm stack deploy and will not be applied.`,
+            ]
+          : []),
+        ...(service.restartPolicy === "unless-stopped"
+          ? [
+              `${service.name || "service"}: unless-stopped is converted to swarm restart policy 'any'.`,
+            ]
+          : []),
+      ]),
+      ...(swarmStatus && !swarmStatus.is_manager
+        ? [
+            `This Docker environment is not a Swarm manager (${swarmStatus.local_node_state || "inactive"}). The runtime will fall back to docker compose up -d for this deploy.`,
+          ]
+        : []),
+    ],
     [services, stackEnvRows, swarmStatus],
   );
 
@@ -708,14 +756,26 @@ export default function DeployContainerModal({
       return;
     }
     setEnvRows((current) => {
-      const preset = buildRequiredRuntimeEnv(image, toRecord(current as KeyValueRow[]));
-      if (preset.autofilled.length === 0 && Object.keys(toRecord(current)).length > 0) {
+      const preset = buildRequiredRuntimeEnv(
+        image,
+        toRecord(current as KeyValueRow[]),
+      );
+      if (
+        preset.autofilled.length === 0 &&
+        Object.keys(toRecord(current)).length > 0
+      ) {
         return current;
       }
-      return Object.entries(preset.environment).map(([key, value]) => ({ key, value }));
+      return Object.entries(preset.environment).map(([key, value]) => ({
+        key,
+        value,
+      }));
     });
     const preset = getImageDeployPreset(image);
-    if (preset?.suggestedPorts?.length && !portRows.some((row) => row.hostPort.trim() || row.containerPort.trim())) {
+    if (
+      preset?.suggestedPorts?.length &&
+      !portRows.some((row) => row.hostPort.trim() || row.containerPort.trim())
+    ) {
       setPortRows(
         preset.suggestedPorts.map((entry) => {
           const [hostPort = "", containerPort = ""] = entry.split(":");
@@ -723,7 +783,10 @@ export default function DeployContainerModal({
         }),
       );
     }
-    if (preset?.volumeTargets?.length && !volumeRows.some((row) => row.target.trim())) {
+    if (
+      preset?.volumeTargets?.length &&
+      !volumeRows.some((row) => row.target.trim())
+    ) {
       setVolumeRows(
         preset.volumeTargets.map((target) => ({
           source: `${(name || preset.defaultContainerName || "app").replace(/\s+/g, "-")}-data`,
@@ -772,7 +835,15 @@ export default function DeployContainerModal({
         stackConfigRows,
       ),
     );
-  }, [namedNetworks, namedVolumes, selectedTags, services, stackEnvRows, stackSecretRows, stackConfigRows]);
+  }, [
+    namedNetworks,
+    namedVolumes,
+    selectedTags,
+    services,
+    stackEnvRows,
+    stackSecretRows,
+    stackConfigRows,
+  ]);
 
   useEffect(() => {
     if (
@@ -855,7 +926,8 @@ export default function DeployContainerModal({
       showNotification({
         type: "error",
         message: "Port conflict detected",
-        description: "Resolve duplicate host ports across services before deploy.",
+        description:
+          "Resolve duplicate host ports across services before deploy.",
       });
       return;
     }
@@ -903,19 +975,24 @@ export default function DeployContainerModal({
         <div
           className={
             embedded
-              ? "mx-auto flex min-h-[calc(100vh-8rem)] w-full  flex-col rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-[#121212]"
-              : "flex h-[90vh] w-full max-w-6xl flex-col rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-[#121212]"
+              ? "mx-auto flex min-h-[calc(100vh-8rem)] w-full flex-col rounded-md border border-zinc-200/80 bg-white/80 shadow-2xl shadow-blue-900/5 backdrop-blur-xl dark:border-white/10 dark:bg-zinc-950/50"
+              : "flex h-[90vh] w-full max-w-6xl flex-col rounded-3xl border border-zinc-200/80 bg-white/80 shadow-2xl shadow-black/40 backdrop-blur-xl dark:border-white/10 dark:bg-[#121212]/80"
           }
         >
-          <div className="flex items-center justify-between border-b border-zinc-100 p-4 dark:border-zinc-800">
-            <div>
-              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-                Deploy Runtime
-              </h2>
-              <p className="text-sm text-zinc-500">
-                Deploy a single container or a Docker Compose stack with
-                form-driven YAML generation.
-              </p>
+          <div className="flex items-center justify-between border-b border-zinc-100 p-6 dark:border-white/5">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 via-blue-500 to-cyan-500 text-white shadow-lg shadow-blue-500/20">
+                <Rocket size={24} className="animate-pulse" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+                  Deploy Runtime
+                </h2>
+                <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
+                  Deploy a single container or a Docker Compose stack with
+                  form-driven YAML generation.
+                </p>
+              </div>
             </div>
             {!embedded ? (
               <button
@@ -926,12 +1003,12 @@ export default function DeployContainerModal({
               </button>
             ) : null}
           </div>
-          <div className="border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
-            <div className="inline-flex rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
+          <div className="border-b border-zinc-100/50 px-8 py-5 dark:border-white/5">
+            <div className="inline-flex rounded-2xl bg-zinc-100/80 p-1.5 shadow-inner dark:bg-zinc-900/80">
               <button
                 type="button"
                 onClick={() => setMode("single")}
-                className={`rounded-lg px-4 py-2 text-sm font-medium ${mode === "single" ? "bg-white shadow-sm dark:bg-[#121212]" : "text-zinc-500"}`}
+                className={`flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold transition-all duration-300 ${mode === "single" ? "bg-white text-blue-600 shadow-sm ring-1 ring-zinc-200/50 dark:bg-zinc-800 dark:text-blue-400 dark:ring-white/10" : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"}`}
               >
                 Single Container
               </button>
@@ -944,26 +1021,26 @@ export default function DeployContainerModal({
                 disabled={
                   !featureFlags.isEnabled("docker_compose_runtime", true)
                 }
-                className={`rounded-lg px-4 py-2 text-sm font-medium ${mode === "compose" ? "bg-white shadow-sm dark:bg-[#121212]" : "text-zinc-500"} ${!featureFlags.isEnabled("docker_compose_runtime", true) ? "cursor-not-allowed opacity-50" : ""}`}
+                className={`flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold transition-all duration-300 ${mode === "compose" ? "bg-white text-indigo-600 shadow-sm ring-1 ring-zinc-200/50 dark:bg-zinc-800 dark:text-indigo-400 dark:ring-white/10" : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"} ${!featureFlags.isEnabled("docker_compose_runtime", true) ? "cursor-not-allowed opacity-50" : ""}`}
               >
                 Docker Compose
               </button>
             </div>
             {!featureFlags.isLoading &&
             !featureFlags.isEnabled("docker_compose_runtime", true) ? (
-              <div className="mt-3 rounded-xl border border-dashed border-zinc-300 px-4 py-3 text-xs text-zinc-500 dark:border-zinc-700">
+              <div className="mt-3 rounded-md border border-dashed border-zinc-300 px-4 py-3 text-xs text-zinc-500 dark:border-zinc-700">
                 Docker Compose runtime is disabled by feature flag. Re-enable
                 `docker_compose_runtime` from Settings to deploy multi-service
                 stacks here.
               </div>
             ) : null}
           </div>
-          <div className="flex-1 overflow-auto p-6">
+          <div className="flex-1 overflow-auto p-8">
             {mode === "single" ? (
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
                 <div className="space-y-5">
                   {singlePreset ? (
-                    <div className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-200">
+                    <div className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-200">
                       <Sparkles className="h-4 w-4" />
                       Suggested config detected for {singlePreset.key}
                     </div>
@@ -976,23 +1053,52 @@ export default function DeployContainerModal({
                       <TabsTrigger value="advanced">Advanced</TabsTrigger>
                     </TabsList>
                     <TabsContent value="basic" className="space-y-4">
-                      <SectionCard title="Container Basics" helper="Use image-aware defaults so common images start with safer ports and names.">
+                      <SectionCard
+                        title="Container Basics"
+                        helper="Use image-aware defaults so common images start with safer ports and names."
+                      >
                         <div className="grid gap-4 lg:grid-cols-2">
                           <Field label="Display Name">
-                            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="web-api" />
+                            <Input
+                              value={name}
+                              onChange={(event) => setName(event.target.value)}
+                              placeholder="web-api"
+                            />
                           </Field>
                           <Field label="Container Name">
-                            <Input value={containerName} onChange={(event) => setContainerName(event.target.value)} placeholder={singlePreset?.defaultContainerName || "app"} />
+                            <Input
+                              value={containerName}
+                              onChange={(event) =>
+                                setContainerName(event.target.value)
+                              }
+                              placeholder={
+                                singlePreset?.defaultContainerName || "app"
+                              }
+                            />
                           </Field>
                           <div className="lg:col-span-2">
                             <Field label="Image">
-                              <Input value={image} onChange={(event) => setImage(event.target.value)} placeholder="sonatype/nexus3:latest" />
+                              <Input
+                                value={image}
+                                onChange={(event) =>
+                                  setImage(event.target.value)
+                                }
+                                placeholder="sonatype/nexus3:latest"
+                              />
                             </Field>
                           </div>
                           <Field label="Registry">
-                            <select value={registryId} onChange={(event) => setRegistryId(event.target.value)} className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-[#121212]">
+                            <select
+                              value={registryId}
+                              onChange={(event) =>
+                                setRegistryId(event.target.value)
+                              }
+                              className="h-10 w-full rounded-md border border-zinc-200/80 bg-white px-3 text-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-[#121212] dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
+                            >
                               <option value="">
-                                {selectedRegistry?.name ? `Use default (${selectedRegistry.name})` : "Use daemon / default registry"}
+                                {selectedRegistry?.name
+                                  ? `Use default (${selectedRegistry.name})`
+                                  : "Use daemon / default registry"}
                               </option>
                               {registries.map((registry) => (
                                 <option key={registry.id} value={registry.id}>
@@ -1002,10 +1108,20 @@ export default function DeployContainerModal({
                             </select>
                           </Field>
                           <Field label="Restart Policy">
-                            <select value={restartPolicy} onChange={(event) => setRestartPolicy(event.target.value as typeof restartPolicy)} className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-[#121212]">
+                            <select
+                              value={restartPolicy}
+                              onChange={(event) =>
+                                setRestartPolicy(
+                                  event.target.value as typeof restartPolicy,
+                                )
+                              }
+                              className="h-10 w-full rounded-md border border-zinc-200/80 bg-white px-3 text-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-[#121212] dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
+                            >
                               <option value="no">no</option>
                               <option value="always">always</option>
-                              <option value="unless-stopped">unless-stopped</option>
+                              <option value="unless-stopped">
+                                unless-stopped
+                              </option>
                               <option value="on-failure">on-failure</option>
                             </select>
                           </Field>
@@ -1017,7 +1133,8 @@ export default function DeployContainerModal({
                         ) : null}
                         {singlePortConflicts.size ? (
                           <div className="rounded-2xl border border-red-200 bg-red-50/80 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200">
-                            Duplicate host ports detected in this container form.
+                            Duplicate host ports detected in this container
+                            form.
                           </div>
                         ) : null}
                         <RowEditor
@@ -1032,9 +1149,15 @@ export default function DeployContainerModal({
                       </SectionCard>
                     </TabsContent>
                     <TabsContent value="storage" className="space-y-4">
-                      <SectionCard title="Storage" helper="Volume targets are validated against known image conventions where possible.">
+                      <SectionCard
+                        title="Storage"
+                        helper="Volume targets are validated against known image conventions where possible."
+                      >
                         {singleVolumeWarnings.map((warning) => (
-                          <div key={warning} className="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                          <div
+                            key={warning}
+                            className="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200"
+                          >
                             {warning}
                           </div>
                         ))}
@@ -1047,9 +1170,15 @@ export default function DeployContainerModal({
                       </SectionCard>
                     </TabsContent>
                     <TabsContent value="network" className="space-y-4">
-                      <SectionCard title="Environment and Tags" helper="Environment values are injected directly and tags become Docker labels.">
+                      <SectionCard
+                        title="Environment and Tags"
+                        helper="Environment values are injected directly and tags become Docker labels."
+                      >
                         {singleEnvWarnings.map((warning) => (
-                          <div key={warning} className="mb-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                          <div
+                            key={warning}
+                            className="mb-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200"
+                          >
                             {warning}
                           </div>
                         ))}
@@ -1081,41 +1210,107 @@ export default function DeployContainerModal({
                       </SectionCard>
                     </TabsContent>
                     <TabsContent value="advanced" className="space-y-4">
-                      <SectionCard title="Resources and Healthcheck" helper="Keep advanced settings collapsed until you need resource caps or runtime checks.">
+                      <SectionCard
+                        title="Resources and Healthcheck"
+                        helper="Keep advanced settings collapsed until you need resource caps or runtime checks."
+                      >
                         <button
                           type="button"
-                          onClick={() => setSingleAdvancedOpen((current) => !current)}
-                          className="mb-4 inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
+                          onClick={() =>
+                            setSingleAdvancedOpen((current) => !current)
+                          }
+                          className="mb-4 inline-flex items-center gap-2 rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
                         >
-                          {singleAdvancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                          {singleAdvancedOpen ? "Hide advanced settings" : "Show advanced settings"}
+                          {singleAdvancedOpen ? (
+                            <ChevronUp className="h-4 w-4" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4" />
+                          )}
+                          {singleAdvancedOpen
+                            ? "Hide advanced settings"
+                            : "Show advanced settings"}
                         </button>
                         {singleAdvancedOpen ? (
                           <div className="grid gap-4 lg:grid-cols-2">
                             <Field label="Memory Limit">
-                              <Input value={memoryLimit} onChange={(event) => setMemoryLimit(event.target.value)} placeholder={singlePreset?.suggestedMemory || "2g"} />
+                              <Input
+                                value={memoryLimit}
+                                onChange={(event) =>
+                                  setMemoryLimit(event.target.value)
+                                }
+                                placeholder={
+                                  singlePreset?.suggestedMemory || "2g"
+                                }
+                              />
                             </Field>
                             <Field label="CPU Limit">
-                              <Input value={cpuLimit} onChange={(event) => setCpuLimit(event.target.value)} placeholder={singlePreset?.suggestedCpus || "1.0"} />
+                              <Input
+                                value={cpuLimit}
+                                onChange={(event) =>
+                                  setCpuLimit(event.target.value)
+                                }
+                                placeholder={
+                                  singlePreset?.suggestedCpus || "1.0"
+                                }
+                              />
                             </Field>
                             <Field label="Healthcheck Command">
-                              <Input value={healthcheckCommand} onChange={(event) => setHealthcheckCommand(event.target.value)} placeholder={singlePreset?.healthcheckCommand || "curl -f http://localhost || exit 1"} />
+                              <Input
+                                value={healthcheckCommand}
+                                onChange={(event) =>
+                                  setHealthcheckCommand(event.target.value)
+                                }
+                                placeholder={
+                                  singlePreset?.healthcheckCommand ||
+                                  "curl -f http://localhost || exit 1"
+                                }
+                              />
                             </Field>
                             <Field label="Healthcheck Interval">
-                              <Input value={healthcheckInterval} onChange={(event) => setHealthcheckInterval(event.target.value)} placeholder="30s" />
+                              <Input
+                                value={healthcheckInterval}
+                                onChange={(event) =>
+                                  setHealthcheckInterval(event.target.value)
+                                }
+                                placeholder="30s"
+                              />
                             </Field>
                             <Field label="Healthcheck Timeout">
-                              <Input value={healthcheckTimeout} onChange={(event) => setHealthcheckTimeout(event.target.value)} placeholder="5s" />
+                              <Input
+                                value={healthcheckTimeout}
+                                onChange={(event) =>
+                                  setHealthcheckTimeout(event.target.value)
+                                }
+                                placeholder="5s"
+                              />
                             </Field>
                             <Field label="Healthcheck Start Period">
-                              <Input value={healthcheckStartPeriod} onChange={(event) => setHealthcheckStartPeriod(event.target.value)} placeholder="10s" />
+                              <Input
+                                value={healthcheckStartPeriod}
+                                onChange={(event) =>
+                                  setHealthcheckStartPeriod(event.target.value)
+                                }
+                                placeholder="10s"
+                              />
                             </Field>
                             <Field label="Healthcheck Retries">
-                              <Input value={healthcheckRetries} onChange={(event) => setHealthcheckRetries(event.target.value)} placeholder="3" />
+                              <Input
+                                value={healthcheckRetries}
+                                onChange={(event) =>
+                                  setHealthcheckRetries(event.target.value)
+                                }
+                                placeholder="3"
+                              />
                             </Field>
                             <div className="flex items-end">
                               <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                                <input type="checkbox" checked={healthcheckDisabled} onChange={(event) => setHealthcheckDisabled(event.target.checked)} />
+                                <input
+                                  type="checkbox"
+                                  checked={healthcheckDisabled}
+                                  onChange={(event) =>
+                                    setHealthcheckDisabled(event.target.checked)
+                                  }
+                                />
                                 Disable healthcheck
                               </label>
                             </div>
@@ -1137,7 +1332,9 @@ export default function DeployContainerModal({
                           ? `Bind mount detected: ${row.source}`
                           : `Named volume detected: ${row.source}`,
                       ),
-                    ...(singlePortConflicts.size ? ["Duplicate host ports detected."] : []),
+                    ...(singlePortConflicts.size
+                      ? ["Duplicate host ports detected."]
+                      : []),
                   ]}
                   yaml={buildSingleContainerYaml({
                     image,
@@ -1164,14 +1361,29 @@ export default function DeployContainerModal({
             ) : (
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
                 <div className="space-y-4">
-                  <SectionCard title="Compose Basics" helper="Shared environment is merged into every service, and default network attach is enforced when a service has none.">
+                  <SectionCard
+                    title="Compose Basics"
+                    helper="Shared environment is merged into every service, and default network attach is enforced when a service has none."
+                  >
                     {swarmStatus && !swarmStatus.is_manager ? (
                       <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                        This runtime is currently <span className="font-medium">{swarmStatus.local_node_state || "inactive"}</span>, not a Swarm manager. Multi-service deploy from this screen will use <span className="font-mono">docker compose up -d</span> instead of <span className="font-mono">docker stack deploy</span>.
+                        This runtime is currently{" "}
+                        <span className="font-medium">
+                          {swarmStatus.local_node_state || "inactive"}
+                        </span>
+                        , not a Swarm manager. Multi-service deploy from this
+                        screen will use{" "}
+                        <span className="font-mono">docker compose up -d</span>{" "}
+                        instead of{" "}
+                        <span className="font-mono">docker stack deploy</span>.
                       </div>
                     ) : null}
                     <Field label="Stack Name">
-                      <Input value={stackName} onChange={(event) => setStackName(event.target.value)} placeholder="customer-platform" />
+                      <Input
+                        value={stackName}
+                        onChange={(event) => setStackName(event.target.value)}
+                        placeholder="customer-platform"
+                      />
                     </Field>
                     <div className="mt-4">
                       <TagSelector
@@ -1224,15 +1436,40 @@ export default function DeployContainerModal({
                     </div>
                   </SectionCard>
                   <div className="grid gap-4 lg:grid-cols-2">
-                    <CompactNameList title="Named Volumes" items={namedVolumes} onChange={setNamedVolumes} addLabel="Add volume" placeholder="app-data" />
-                    <CompactNameList title="Named Networks" items={namedNetworks} onChange={setNamedNetworks} addLabel="Add network" placeholder="app-network" includeDefaultHint />
+                    <CompactNameList
+                      title="Named Volumes"
+                      items={namedVolumes}
+                      onChange={setNamedVolumes}
+                      addLabel="Add volume"
+                      placeholder="app-data"
+                    />
+                    <CompactNameList
+                      title="Named Networks"
+                      items={namedNetworks}
+                      onChange={setNamedNetworks}
+                      addLabel="Add network"
+                      placeholder="app-network"
+                      includeDefaultHint
+                    />
                   </div>
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Services</h3>
-                      <p className="text-sm text-zinc-500">Expand a service only when you need to tune it.</p>
+                      <h3 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+                        Services
+                      </h3>
+                      <p className="text-sm text-zinc-500">
+                        Expand a service only when you need to tune it.
+                      </p>
                     </div>
-                    <Button variant="outline" onClick={() => setServices((current) => [...current, createService(`service-${current.length + 1}`)])}>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        setServices((current) => [
+                          ...current,
+                          createService(`service-${current.length + 1}`),
+                        ])
+                      }
+                    >
                       <Plus className="mr-2 h-4 w-4" />
                       Add service
                     </Button>
@@ -1246,7 +1483,9 @@ export default function DeployContainerModal({
                       portConflicts={composePortConflicts}
                       onChange={(nextService) =>
                         setServices((current) =>
-                          current.map((item) => (item.id === service.id ? nextService : item)),
+                          current.map((item) =>
+                            item.id === service.id ? nextService : item,
+                          ),
                         )
                       }
                       onRemove={() =>
@@ -1273,7 +1512,7 @@ export default function DeployContainerModal({
               </div>
             )}
           </div>
-          <div className="flex justify-end gap-2 rounded-b-xl border-t border-zinc-100 bg-zinc-50/50 p-4 dark:border-zinc-800 dark:bg-[#121212]">
+          <div className="flex items-center justify-end gap-3 rounded-b-3xl border-t border-zinc-200/60 bg-zinc-50/80 p-6 backdrop-blur-xl dark:border-white/10 dark:bg-[#121212]/80">
             {!embedded ? (
               <Button variant="outline" onClick={close}>
                 Cancel
@@ -1330,13 +1569,17 @@ function CompactNameList({
         </h3>
         {includeDefaultHint ? (
           <p className="text-xs text-zinc-500">
-            If a service has no selected network, `default` will be attached automatically.
+            If a service has no selected network, `default` will be attached
+            automatically.
           </p>
         ) : null}
       </div>
       <div className="space-y-2">
         {items.map((item, index) => (
-          <div key={`${title}-${index}`} className="grid grid-cols-[1fr_auto] gap-2">
+          <div
+            key={`${title}-${index}`}
+            className="grid grid-cols-[1fr_auto] gap-2"
+          >
             <Input
               value={item}
               onChange={(event) =>
@@ -1388,11 +1631,7 @@ function VolumeEditor({
   image: string;
 }) {
   const imageHints = getImageDeployPreset(image)?.volumeTargets || [];
-  const bindSuggestions = [
-    "./data",
-    "/srv/app-data",
-    "C:\\docker\\data",
-  ];
+  const bindSuggestions = ["./data", "/srv/app-data", "C:\\docker\\data"];
 
   return (
     <div>
@@ -1401,59 +1640,145 @@ function VolumeEditor({
           {title}
         </label>
       </div>
-      <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/30">
+      <div className="space-y-3 rounded-2xl border border-zinc-200/60 bg-zinc-50/50 p-4 dark:border-white/5 dark:bg-zinc-950/20">
         {rows.map((row, index) => {
-          const sourceValid = row.sourceType === "bind" ? isValidBindPath(row.source) : isValidNamedVolume(row.source);
-          const sourceHint = row.sourceType === "bind" ? "Bind Path" : "Named Volume";
+          const sourceValid =
+            row.sourceType === "bind"
+              ? isValidBindPath(row.source)
+              : isValidNamedVolume(row.source);
+          const sourceHint =
+            row.sourceType === "bind" ? "Bind Path" : "Named Volume";
           return (
-            <div key={`${title}-${index}`} className="space-y-2 rounded-xl border border-zinc-200/70 bg-white/80 p-3 dark:border-zinc-800 dark:bg-[#121212]">
+            <div
+              key={`${title}-${index}`}
+              className="space-y-3 rounded-md border border-zinc-200/80 bg-white/80 backdrop-blur p-4 shadow-sm transition-all duration-200 hover:border-blue-200 dark:border-white/5 dark:bg-[#121212]/80 dark:hover:border-blue-900/50"
+            >
               <div className="grid grid-cols-[160px_1fr_1fr_120px_auto] gap-2">
                 <div>
-                  {index === 0 ? <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-500">Source Type</div> : null}
+                  {index === 0 ? (
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+                      Source Type
+                    </div>
+                  ) : null}
                   <select
                     value={row.sourceType}
                     onChange={(event) =>
-                      onChange(rows.map((item, itemIndex) => itemIndex === index ? { ...item, sourceType: event.target.value as "named" | "bind" } : item))
+                      onChange(
+                        rows.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? {
+                                ...item,
+                                sourceType: event.target.value as
+                                  | "named"
+                                  | "bind",
+                              }
+                            : item,
+                        ),
+                      )
                     }
-                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-[#121212]"
+                    className="h-10 w-full rounded-md border border-zinc-200/80 bg-white px-3 text-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-[#121212] dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
                   >
                     <option value="named">Named Volume</option>
                     <option value="bind">Bind Path</option>
                   </select>
                 </div>
                 <div>
-                  {index === 0 ? <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-500">{sourceHint}</div> : null}
+                  {index === 0 ? (
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+                      {sourceHint}
+                    </div>
+                  ) : null}
                   <Input
                     value={row.source}
-                    onChange={(event) => onChange(rows.map((item, itemIndex) => itemIndex === index ? { ...item, source: event.target.value } : item))}
-                    placeholder={row.sourceType === "bind" ? "./data or /srv/app-data" : "app-data"}
-                    className={row.source.trim() && !sourceValid ? "border-red-300 dark:border-red-700" : ""}
+                    onChange={(event) =>
+                      onChange(
+                        rows.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, source: event.target.value }
+                            : item,
+                        ),
+                      )
+                    }
+                    placeholder={
+                      row.sourceType === "bind"
+                        ? "./data or /srv/app-data"
+                        : "app-data"
+                    }
+                    className={
+                      row.source.trim() && !sourceValid
+                        ? "border-red-300 dark:border-red-700"
+                        : ""
+                    }
                   />
                 </div>
                 <div>
-                  {index === 0 ? <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-500">Target Path</div> : null}
+                  {index === 0 ? (
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+                      Target Path
+                    </div>
+                  ) : null}
                   <Input
                     value={row.target}
-                    onChange={(event) => onChange(rows.map((item, itemIndex) => itemIndex === index ? { ...item, target: event.target.value } : item))}
+                    onChange={(event) =>
+                      onChange(
+                        rows.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, target: event.target.value }
+                            : item,
+                        ),
+                      )
+                    }
                     placeholder={imageHints[0] || "/data"}
                   />
                 </div>
                 <div>
-                  {index === 0 ? <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-500">Mode</div> : null}
+                  {index === 0 ? (
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+                      Mode
+                    </div>
+                  ) : null}
                   <select
                     value={row.mode}
-                    onChange={(event) => onChange(rows.map((item, itemIndex) => itemIndex === index ? { ...item, mode: event.target.value as "rw" | "ro" } : item))}
-                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-[#121212]"
+                    onChange={(event) =>
+                      onChange(
+                        rows.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? {
+                                ...item,
+                                mode: event.target.value as "rw" | "ro",
+                              }
+                            : item,
+                        ),
+                      )
+                    }
+                    className="h-10 w-full rounded-md border border-zinc-200/80 bg-white px-3 text-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-[#121212] dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
                   >
                     <option value="rw">Read/Write</option>
                     <option value="ro">Read only</option>
                   </select>
                 </div>
                 <div className="flex items-end gap-1">
-                  <Button type="button" variant="ghost" size="icon" onClick={() => onChange([...rows, emptyVolume()])} title="Add row">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onChange([...rows, emptyVolume()])}
+                    title="Add row"
+                  >
                     <Plus className="h-4 w-4" />
                   </Button>
-                  <Button type="button" variant="ghost" size="icon" onClick={() => onChange(rows.length > 1 ? rows.filter((_, itemIndex) => itemIndex !== index) : [emptyVolume()])}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() =>
+                      onChange(
+                        rows.length > 1
+                          ? rows.filter((_, itemIndex) => itemIndex !== index)
+                          : [emptyVolume()],
+                      )
+                    }
+                  >
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
@@ -1464,7 +1789,19 @@ function VolumeEditor({
                       <button
                         key={`${row.source}-${suggestion}`}
                         type="button"
-                        onClick={() => onChange(rows.map((item, itemIndex) => itemIndex === index ? { ...item, source: suggestion, sourceType: "bind" } : item))}
+                        onClick={() =>
+                          onChange(
+                            rows.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? {
+                                    ...item,
+                                    source: suggestion,
+                                    sourceType: "bind",
+                                  }
+                                : item,
+                            ),
+                          )
+                        }
                         className="rounded-full border border-zinc-200 px-2.5 py-1 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-300"
                       >
                         {suggestion}
@@ -1474,7 +1811,15 @@ function VolumeEditor({
                       <button
                         key={`${row.source}-${hint}`}
                         type="button"
-                        onClick={() => onChange(rows.map((item, itemIndex) => itemIndex === index ? { ...item, target: hint } : item))}
+                        onClick={() =>
+                          onChange(
+                            rows.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? { ...item, target: hint }
+                                : item,
+                            ),
+                          )
+                        }
                         className="rounded-full border border-zinc-200 px-2.5 py-1 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-300"
                       >
                         {hint}
@@ -1506,7 +1851,7 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-[24px] border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
+    <section className="group rounded-md border border-zinc-200/60 bg-white p-6 shadow-sm transition-all duration-300 hover:shadow-md dark:border-white/5 dark:bg-[#121212]/40">
       <div className="mb-4">
         <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
           {title}
@@ -1549,30 +1894,34 @@ function YamlPreviewCard({
   warnings: string[];
 }) {
   return (
-    <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
-      <div className="mb-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-        {title}
+    <div className="sticky top-0 overflow-hidden rounded-md border border-zinc-200/80 bg-zinc-50/50 shadow-sm backdrop-blur-xl dark:border-white/5 dark:bg-[#121212]/80">
+      <div className="border-b border-zinc-200/60 bg-white/50 px-5 py-4 dark:border-white/5 dark:bg-white/5">
+        <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+          {title}
+        </h3>
       </div>
-      {warnings.length ? (
-        <div className="mb-4 space-y-2">
-          {warnings.map((warning) => (
-            <div
-              key={warning}
-              className="inline-flex w-full items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200"
-            >
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{warning}</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      <textarea
-        value={yaml}
-        onChange={() => undefined}
-        readOnly
-        spellCheck={false}
-        className="min-h-[520px] w-full rounded-xl border border-zinc-200 bg-zinc-50 p-4 font-mono text-sm dark:border-zinc-800 dark:bg-zinc-950"
-      />
+      <div className="p-5">
+        {warnings.length ? (
+          <div className="mb-4 space-y-2">
+            {warnings.map((warning) => (
+              <div
+                key={warning}
+                className="inline-flex w-full items-start gap-2 rounded-md border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200"
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{warning}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <textarea
+          value={yaml}
+          onChange={() => undefined}
+          readOnly
+          spellCheck={false}
+          className="min-h-[520px] w-full resize-none rounded-md border border-zinc-200/60 bg-zinc-100/50 p-5 font-mono text-sm shadow-inner focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/50 dark:border-white/5 dark:bg-[#0a0a0a] dark:text-zinc-300"
+        />
+      </div>
     </div>
   );
 }
@@ -1625,15 +1974,32 @@ function ServiceCard({
             {preset ? <Badge variant="success">{preset.key}</Badge> : null}
           </div>
           <div className="mt-1 text-xs text-zinc-500">
-            {service.image || "No image selected"} • ports {toPortList(service.ports).length} • volumes {toVolumeList(service.volumes).length}
+            {service.image || "No image selected"} • ports{" "}
+            {toPortList(service.ports).length} • volumes{" "}
+            {toVolumeList(service.volumes).length}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => onChange({ ...service, expanded: !service.expanded })}>
-            {service.expanded ? <ChevronUp className="mr-2 h-4 w-4" /> : <ChevronDown className="mr-2 h-4 w-4" />}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              onChange({ ...service, expanded: !service.expanded })
+            }
+          >
+            {service.expanded ? (
+              <ChevronUp className="mr-2 h-4 w-4" />
+            ) : (
+              <ChevronDown className="mr-2 h-4 w-4" />
+            )}
             {service.expanded ? "Collapse" : "Expand"}
           </Button>
-          <Button variant="ghost" size="icon" onClick={onRemove} disabled={disableRemove}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onRemove}
+            disabled={disableRemove}
+          >
             <Trash2 className="h-4 w-4" />
           </Button>
         </div>
@@ -1641,7 +2007,10 @@ function ServiceCard({
       {service.expanded ? (
         <>
           {warnings.map((warning) => (
-            <div key={`${service.id}-${warning}`} className="mb-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+            <div
+              key={`${service.id}-${warning}`}
+              className="mb-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200"
+            >
               {warning}
             </div>
           ))}
@@ -1655,16 +2024,47 @@ function ServiceCard({
             <TabsContent value="basic" className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="Service Name">
-                  <Input value={service.name} onChange={(event) => onChange({ ...service, name: event.target.value })} placeholder="web" />
+                  <Input
+                    value={service.name}
+                    onChange={(event) =>
+                      onChange({ ...service, name: event.target.value })
+                    }
+                    placeholder="web"
+                  />
                 </Field>
                 <Field label="Image">
-                  <Input value={service.image} onChange={(event) => onChange({ ...service, image: event.target.value })} placeholder="nginx:stable-alpine" />
+                  <Input
+                    value={service.image}
+                    onChange={(event) =>
+                      onChange({ ...service, image: event.target.value })
+                    }
+                    placeholder="nginx:stable-alpine"
+                  />
                 </Field>
                 <Field label="Container Name">
-                  <Input value={service.containerName} onChange={(event) => onChange({ ...service, containerName: event.target.value })} placeholder={preset?.defaultContainerName || "service"} />
+                  <Input
+                    value={service.containerName}
+                    onChange={(event) =>
+                      onChange({
+                        ...service,
+                        containerName: event.target.value,
+                      })
+                    }
+                    placeholder={preset?.defaultContainerName || "service"}
+                  />
                 </Field>
                 <Field label="Restart Policy">
-                  <select value={service.restartPolicy} onChange={(event) => onChange({ ...service, restartPolicy: event.target.value as ServiceDraft["restartPolicy"] })} className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-[#121212]">
+                  <select
+                    value={service.restartPolicy}
+                    onChange={(event) =>
+                      onChange({
+                        ...service,
+                        restartPolicy: event.target
+                          .value as ServiceDraft["restartPolicy"],
+                      })
+                    }
+                    className="h-10 w-full rounded-md border border-zinc-200/80 bg-white px-3 text-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-[#121212] dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
+                  >
                     <option value="no">no</option>
                     <option value="always">always</option>
                     <option value="unless-stopped">unless-stopped</option>
@@ -1706,10 +2106,39 @@ function ServiceCard({
                 rightPlaceholder="prod"
                 isEnv
               />
-              <CompactNameList title="Service Networks" items={service.networks} onChange={(items) => onChange({ ...service, networks: items })} addLabel="Add network" placeholder="app-network" includeDefaultHint />
-              <CompactNameList title="Depends On" items={service.dependsOn.length ? service.dependsOn : [""]} onChange={(items) => onChange({ ...service, dependsOn: items })} addLabel="Add dependency" placeholder="postgres" />
-              <CompactNameList title="Secret References" items={service.secretRefs.length ? service.secretRefs : [""]} onChange={(items) => onChange({ ...service, secretRefs: items })} addLabel="Add secret" placeholder="db_password" />
-              <CompactNameList title="Config References" items={service.configRefs.length ? service.configRefs : [""]} onChange={(items) => onChange({ ...service, configRefs: items })} addLabel="Add config" placeholder="app_config" />
+              <CompactNameList
+                title="Service Networks"
+                items={service.networks}
+                onChange={(items) => onChange({ ...service, networks: items })}
+                addLabel="Add network"
+                placeholder="app-network"
+                includeDefaultHint
+              />
+              <CompactNameList
+                title="Depends On"
+                items={service.dependsOn.length ? service.dependsOn : [""]}
+                onChange={(items) => onChange({ ...service, dependsOn: items })}
+                addLabel="Add dependency"
+                placeholder="postgres"
+              />
+              <CompactNameList
+                title="Secret References"
+                items={service.secretRefs.length ? service.secretRefs : [""]}
+                onChange={(items) =>
+                  onChange({ ...service, secretRefs: items })
+                }
+                addLabel="Add secret"
+                placeholder="db_password"
+              />
+              <CompactNameList
+                title="Config References"
+                items={service.configRefs.length ? service.configRefs : [""]}
+                onChange={(items) =>
+                  onChange({ ...service, configRefs: items })
+                }
+                addLabel="Add config"
+                placeholder="app_config"
+              />
               <TagSelector
                 title="Service Tags"
                 description="Use service-level tags when only one compose service should receive a routing or policy label."
@@ -1726,38 +2155,131 @@ function ServiceCard({
               />
             </TabsContent>
             <TabsContent value="advanced" className="space-y-4">
-              <button type="button" onClick={() => onChange({ ...service, advancedOpen: !service.advancedOpen })} className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
-                {service.advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                {service.advancedOpen ? "Hide advanced settings" : "Show advanced settings"}
+              <button
+                type="button"
+                onClick={() =>
+                  onChange({ ...service, advancedOpen: !service.advancedOpen })
+                }
+                className="inline-flex items-center gap-2 rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
+              >
+                {service.advancedOpen ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+                {service.advancedOpen
+                  ? "Hide advanced settings"
+                  : "Show advanced settings"}
               </button>
               {service.advancedOpen ? (
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field label="Memory Limit">
-                    <Input value={service.memoryLimit} onChange={(event) => onChange({ ...service, memoryLimit: event.target.value })} placeholder={preset?.suggestedMemory || "2g"} />
+                    <Input
+                      value={service.memoryLimit}
+                      onChange={(event) =>
+                        onChange({
+                          ...service,
+                          memoryLimit: event.target.value,
+                        })
+                      }
+                      placeholder={preset?.suggestedMemory || "2g"}
+                    />
                   </Field>
                   <Field label="CPU Limit">
-                    <Input value={service.cpuLimit} onChange={(event) => onChange({ ...service, cpuLimit: event.target.value })} placeholder={preset?.suggestedCpus || "1.0"} />
+                    <Input
+                      value={service.cpuLimit}
+                      onChange={(event) =>
+                        onChange({ ...service, cpuLimit: event.target.value })
+                      }
+                      placeholder={preset?.suggestedCpus || "1.0"}
+                    />
                   </Field>
                   <Field label="Healthcheck Command">
-                    <Input value={service.healthcheckCommand} onChange={(event) => onChange({ ...service, healthcheckCommand: event.target.value })} placeholder={preset?.healthcheckCommand || "curl -f http://localhost || exit 1"} />
+                    <Input
+                      value={service.healthcheckCommand}
+                      onChange={(event) =>
+                        onChange({
+                          ...service,
+                          healthcheckCommand: event.target.value,
+                        })
+                      }
+                      placeholder={
+                        preset?.healthcheckCommand ||
+                        "curl -f http://localhost || exit 1"
+                      }
+                    />
                   </Field>
                   <Field label="Healthcheck Interval">
-                    <Input value={service.healthcheckInterval} onChange={(event) => onChange({ ...service, healthcheckInterval: event.target.value })} placeholder="30s" />
+                    <Input
+                      value={service.healthcheckInterval}
+                      onChange={(event) =>
+                        onChange({
+                          ...service,
+                          healthcheckInterval: event.target.value,
+                        })
+                      }
+                      placeholder="30s"
+                    />
                   </Field>
                   <Field label="Healthcheck Timeout">
-                    <Input value={service.healthcheckTimeout} onChange={(event) => onChange({ ...service, healthcheckTimeout: event.target.value })} placeholder="5s" />
+                    <Input
+                      value={service.healthcheckTimeout}
+                      onChange={(event) =>
+                        onChange({
+                          ...service,
+                          healthcheckTimeout: event.target.value,
+                        })
+                      }
+                      placeholder="5s"
+                    />
                   </Field>
                   <Field label="Healthcheck Retries">
-                    <Input value={service.healthcheckRetries} onChange={(event) => onChange({ ...service, healthcheckRetries: event.target.value })} placeholder="3" />
+                    <Input
+                      value={service.healthcheckRetries}
+                      onChange={(event) =>
+                        onChange({
+                          ...service,
+                          healthcheckRetries: event.target.value,
+                        })
+                      }
+                      placeholder="3"
+                    />
                   </Field>
                   <Field label="Logging Driver">
-                    <Input value={service.loggingDriver} onChange={(event) => onChange({ ...service, loggingDriver: event.target.value })} placeholder="json-file" />
+                    <Input
+                      value={service.loggingDriver}
+                      onChange={(event) =>
+                        onChange({
+                          ...service,
+                          loggingDriver: event.target.value,
+                        })
+                      }
+                      placeholder="json-file"
+                    />
                   </Field>
                   <Field label="Log Max Size">
-                    <Input value={service.loggingMaxSize} onChange={(event) => onChange({ ...service, loggingMaxSize: event.target.value })} placeholder="10m" />
+                    <Input
+                      value={service.loggingMaxSize}
+                      onChange={(event) =>
+                        onChange({
+                          ...service,
+                          loggingMaxSize: event.target.value,
+                        })
+                      }
+                      placeholder="10m"
+                    />
                   </Field>
                   <Field label="Log Max File">
-                    <Input value={service.loggingMaxFile} onChange={(event) => onChange({ ...service, loggingMaxFile: event.target.value })} placeholder="3" />
+                    <Input
+                      value={service.loggingMaxFile}
+                      onChange={(event) =>
+                        onChange({
+                          ...service,
+                          loggingMaxFile: event.target.value,
+                        })
+                      }
+                      placeholder="3"
+                    />
                   </Field>
                 </div>
               ) : null}

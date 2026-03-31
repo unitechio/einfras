@@ -108,6 +108,7 @@ export const useLiveContainerLogs = (environmentId: string, containerId: string,
       setStatus("idle");
       return;
     }
+    setLogs("");
     setStatus("connecting");
     const socket = new WebSocket(buildApiWebSocketUrl(`/v1/environments/${environmentId}/docker/containers/${containerId}/logs/ws?tail=${tail}`));
     socket.onopen = () => setStatus("connected");
@@ -201,6 +202,26 @@ export const useDockerDiskUsage = (environmentId: string) => {
       return apiFetch(`/v1/environments/${environmentId}/docker/disk-usage`);
     },
     enabled: !!environmentId,
+  });
+};
+
+export const useReclaimDiskSpace = (environmentId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      return apiFetch<{ message: string }>(`/v1/environments/${environmentId}/docker/system/prune`, {
+        method: 'POST',
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: dockerKeys.diskUsage(environmentId) });
+      queryClient.invalidateQueries({ queryKey: dockerKeys.containers(environmentId) });
+      queryClient.invalidateQueries({ queryKey: dockerKeys.images(environmentId) });
+      queryClient.invalidateQueries({ queryKey: dockerKeys.networks(environmentId) });
+      queryClient.invalidateQueries({ queryKey: dockerKeys.volumes(environmentId) });
+      queryClient.invalidateQueries({ queryKey: dockerKeys.topology(environmentId) });
+      queryClient.invalidateQueries({ queryKey: dockerKeys.audit(environmentId) });
+    },
   });
 };
 

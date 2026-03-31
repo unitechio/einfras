@@ -1,6 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Pencil, Plus, RefreshCw, Search, Shield, Trash2, User, Users } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings2,
+  Shield,
+  Trash2,
+  User,
+  Users,
+  X,
+} from "lucide-react";
 
 import { useNotification } from "@/core/NotificationContext";
 import { accessApi, type TypedControlResult } from "@/shared/api/client";
@@ -30,7 +43,11 @@ type UserFormState = {
   rename_to: string;
   home: string;
   shell: string;
-  groups: string;
+  groups: string[];          // now a real string array
+  password: string;
+  ssh_key: string;
+  uid: string;               // advanced
+  system: boolean;           // system user toggle
   remove_home: boolean;
 };
 
@@ -38,6 +55,7 @@ type GroupFormState = {
   target: string;
   rename_to: string;
   members: string;
+  gid: string;               // advanced
 };
 
 const DEFAULT_USER_FORM: UserFormState = {
@@ -45,7 +63,11 @@ const DEFAULT_USER_FORM: UserFormState = {
   rename_to: "",
   home: "",
   shell: "/bin/bash",
-  groups: "",
+  groups: [],
+  password: "",
+  ssh_key: "",
+  uid: "",
+  system: false,
   remove_home: true,
 };
 
@@ -53,10 +75,115 @@ const DEFAULT_GROUP_FORM: GroupFormState = {
   target: "",
   rename_to: "",
   members: "",
+  gid: "",
 };
 
 const LINUX_ACCOUNT_NAME = /^[a-z_][a-z0-9_-]{0,31}$/;
 
+/* ─── tiny multi-select ─── */
+function MultiGroupSelect({
+  options,
+  selected,
+  onChange,
+  disabled,
+}: {
+  options: { name: string; gid: number }[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = options.filter(
+    (opt) =>
+      opt.name.toLowerCase().includes(search.toLowerCase()) ||
+      String(opt.gid).includes(search),
+  );
+
+  const toggle = (name: string) => {
+    onChange(selected.includes(name) ? selected.filter((g) => g !== name) : [...selected, name]);
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex w-full min-h-[36px] items-center justify-between gap-2 rounded-xl border border-zinc-200/70 bg-white px-3 py-1.5 text-left text-sm text-zinc-700 shadow-sm transition hover:border-indigo-400/60 dark:border-zinc-800/70 dark:bg-zinc-900 dark:text-zinc-200 disabled:opacity-50"
+      >
+        <div className="flex flex-wrap gap-1">
+          {selected.length === 0 ? (
+            <span className="text-zinc-400 text-[13px]">Select groups…</span>
+          ) : (
+            selected.map((g) => (
+              <span
+                key={g}
+                className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-200/60 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-900/20 dark:border-indigo-800/60 dark:text-indigo-300"
+              >
+                {g}
+                <X
+                  size={10}
+                  className="cursor-pointer hover:text-indigo-900 dark:hover:text-indigo-100"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggle(g);
+                  }}
+                />
+              </span>
+            ))
+          )}
+        </div>
+        {open ? <ChevronUp size={14} className="shrink-0 text-zinc-400" /> : <ChevronDown size={14} className="shrink-0 text-zinc-400" />}
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full rounded-xl border border-zinc-200/60 bg-white shadow-xl dark:border-zinc-800/60 dark:bg-zinc-900">
+          <div className="p-2">
+            <input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search groups…"
+              className="w-full rounded-lg border border-zinc-200/60 bg-zinc-50 px-3 py-1.5 text-[13px] outline-none dark:border-zinc-800/60 dark:bg-zinc-950 dark:text-zinc-200"
+            />
+          </div>
+          <ul className="max-h-52 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800">
+            {filtered.length === 0 ? (
+              <li className="px-4 py-3 text-center text-[12px] text-zinc-400">No groups found</li>
+            ) : (
+              filtered.map((opt) => {
+                const isSelected = selected.includes(opt.name);
+                return (
+                  <li
+                    key={opt.name}
+                    onClick={() => toggle(opt.name)}
+                    className={`flex cursor-pointer items-center justify-between px-4 py-2 text-[13px] transition hover:bg-indigo-50 dark:hover:bg-indigo-900/20 ${isSelected ? "bg-indigo-50/60 dark:bg-indigo-900/10" : ""}`}
+                  >
+                    <span className="font-medium text-zinc-800 dark:text-zinc-100">{opt.name}</span>
+                    <span className="text-[11px] text-zinc-400">GID {opt.gid}</span>
+                  </li>
+                );
+              })
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── main component ─── */
 export default function ServerUsers() {
   const { serverId = "" } = useParams();
   const { showNotification } = useNotification();
@@ -74,6 +201,8 @@ export default function ServerUsers() {
   const [groupSearch, setGroupSearch] = useState("");
   const [deleteUserCandidate, setDeleteUserCandidate] = useState<string | null>(null);
   const [deleteGroupCandidate, setDeleteGroupCandidate] = useState<string | null>(null);
+  const [showUserAdvanced, setShowUserAdvanced] = useState(false);
+  const [showGroupAdvanced, setShowGroupAdvanced] = useState(false);
 
   const loadData = async (): Promise<{ users: ServerUserRow[]; groups: ServerGroupRow[] }> => {
     if (!serverId) return { users: [], groups: [] };
@@ -106,7 +235,12 @@ export default function ServerUsers() {
     void loadData();
   }, [serverId]);
 
-  const availableGroupNames = useMemo(() => groups.map((group) => group.name).sort(), [groups]);
+  /* group options for multi-select */
+  const groupOptions = useMemo(
+    () => groups.map((g) => ({ name: g.name, gid: g.gid })).sort((a, b) => a.name.localeCompare(b.name)),
+    [groups],
+  );
+
   const filteredUsers = useMemo(() => {
     const keyword = userSearch.trim().toLowerCase();
     if (!keyword) return users;
@@ -116,24 +250,27 @@ export default function ServerUsers() {
       ),
     );
   }, [users, userSearch]);
+
   const filteredGroups = useMemo(() => {
     const keyword = groupSearch.trim().toLowerCase();
     if (!keyword) return groups;
-    return groups.filter((group) =>
-      group.name.toLowerCase().includes(keyword) ||
-      String(group.gid).includes(keyword) ||
-      group.members.some((member) => member.toLowerCase().includes(keyword)),
+    return groups.filter(
+      (group) =>
+        group.name.toLowerCase().includes(keyword) ||
+        String(group.gid).includes(keyword) ||
+        group.members.some((member) => member.toLowerCase().includes(keyword)),
     );
   }, [groups, groupSearch]);
 
   const resetUserForm = () => {
     setUserFormMode("create");
     setUserForm(DEFAULT_USER_FORM);
+    setShowUserAdvanced(false);
   };
-
   const resetGroupForm = () => {
     setGroupFormMode("create");
     setGroupForm(DEFAULT_GROUP_FORM);
+    setShowGroupAdvanced(false);
   };
 
   const submitUserAction = async () => {
@@ -158,7 +295,11 @@ export default function ServerUsers() {
           rename_to: userForm.rename_to.trim(),
           home: userForm.home.trim(),
           shell: userForm.shell.trim(),
-          groups: splitCsv(userForm.groups),
+          groups: userForm.groups,
+          password: userForm.password.trim() || undefined,
+          ssh_key: userForm.ssh_key.trim() || undefined,
+          uid: userForm.uid.trim() ? Number(userForm.uid.trim()) : undefined,
+          system: userForm.system || undefined,
           remove_home: userForm.remove_home,
         }),
       });
@@ -171,7 +312,7 @@ export default function ServerUsers() {
         message: userFormMode === "create" ? "User workflow completed" : "User workflow updated",
         description: wasVerified
           ? `${expectedUser} is now visible in the latest inventory snapshot.`
-          : `${expectedUser} command succeeded, but the refreshed inventory has not reflected the change yet. Check node privileges and refresh once more.`,
+          : `${expectedUser} command succeeded, but the refreshed inventory has not reflected the change yet.`,
       });
       resetUserForm();
     } catch (error) {
@@ -206,6 +347,7 @@ export default function ServerUsers() {
           target,
           rename_to: groupForm.rename_to.trim(),
           members: splitCsv(groupForm.members),
+          gid: groupForm.gid.trim() ? Number(groupForm.gid.trim()) : undefined,
         }),
       });
       const snapshot = await loadData();
@@ -217,7 +359,7 @@ export default function ServerUsers() {
         message: groupFormMode === "create" ? "Group workflow completed" : "Group workflow updated",
         description: wasVerified
           ? `${expectedGroup} is now visible in the latest inventory snapshot.`
-          : `${expectedGroup} command succeeded, but the refreshed inventory has not reflected the change yet. Check node privileges and refresh once more.`,
+          : `${expectedGroup} command succeeded, but the refreshed inventory has not reflected the change yet.`,
       });
       resetGroupForm();
     } catch (error) {
@@ -240,18 +382,10 @@ export default function ServerUsers() {
         target: username,
         payload: JSON.stringify({ target: username, remove_home: true }),
       });
-      showNotification({
-        type: "success",
-        message: "User deleted",
-        description: `${username} has been removed from the node.`,
-      });
+      showNotification({ type: "success", message: "User deleted", description: `${username} has been removed from the node.` });
       await loadData();
     } catch (error) {
-      showNotification({
-        type: "error",
-        message: "Unable to delete user",
-        description: error instanceof Error ? error.message : "Request failed.",
-      });
+      showNotification({ type: "error", message: "Unable to delete user", description: error instanceof Error ? error.message : "Request failed." });
     } finally {
       setUserActionLoading(false);
     }
@@ -266,18 +400,10 @@ export default function ServerUsers() {
         target: groupName,
         payload: JSON.stringify({ target: groupName }),
       });
-      showNotification({
-        type: "success",
-        message: "Group deleted",
-        description: `${groupName} has been removed from the node.`,
-      });
+      showNotification({ type: "success", message: "Group deleted", description: `${groupName} has been removed from the node.` });
       await loadData();
     } catch (error) {
-      showNotification({
-        type: "error",
-        message: "Unable to delete group",
-        description: error instanceof Error ? error.message : "Request failed.",
-      });
+      showNotification({ type: "error", message: "Unable to delete group", description: error instanceof Error ? error.message : "Request failed." });
     } finally {
       setGroupActionLoading(false);
     }
@@ -291,19 +417,21 @@ export default function ServerUsers() {
       rename_to: "",
       home: user.home,
       shell: user.shell,
-      groups: groups.filter((group) => group.members.includes(user.username)).map((group) => group.name).join(", "),
+      groups: groups.filter((g) => g.members.includes(user.username)).map((g) => g.name),
+      password: "",
+      ssh_key: "",
+      uid: String(user.uid),
+      system: user.uid < 1000,
       remove_home: true,
     });
+    setShowUserAdvanced(false);
   };
 
   const editGroup = (group: ServerGroupRow) => {
     setActiveTab("groups");
     setGroupFormMode("edit");
-    setGroupForm({
-      target: group.name,
-      rename_to: "",
-      members: group.members.join(", "),
-    });
+    setGroupForm({ target: group.name, rename_to: "", members: group.members.join(", "), gid: String(group.gid) });
+    setShowGroupAdvanced(false);
   };
 
   return (
@@ -317,7 +445,7 @@ export default function ServerUsers() {
             Access Control
           </h2>
           <p className="mt-2 text-[13px] text-zinc-500 dark:text-zinc-400">
-            User và group giờ có thể thao tác trực tiếp qua agent typed operations, không chỉ xem inventory read-only nữa.
+            Manage Linux users and groups directly on the node via typed agent operations.
           </p>
         </div>
         <Button variant="outline" onClick={() => void loadData()} disabled={loading || userActionLoading || groupActionLoading}>
@@ -332,6 +460,7 @@ export default function ServerUsers() {
           <TabsTrigger value="groups" icon={Users}>Groups</TabsTrigger>
         </TabsList>
 
+        {/* ─────────── USERS TAB ─────────── */}
         <TabsContent value="users">
           <div className="mb-4 rounded-xl border border-zinc-200/60 bg-white p-4 shadow-sm dark:border-zinc-800/60 dark:bg-[#121212]">
             <div className="mb-4 flex items-center justify-between">
@@ -340,36 +469,151 @@ export default function ServerUsers() {
                   {userFormMode === "create" ? "Add user" : `Edit user ${userForm.target}`}
                 </div>
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Home, shell và group membership sẽ được apply trực tiếp trên node.
+                  Home, shell and group membership will be applied directly on the node.
                 </div>
               </div>
-              {userFormMode === "edit" ? (
+              {userFormMode === "edit" && (
                 <Button variant="outline" onClick={resetUserForm}>Cancel Edit</Button>
-              ) : null}
+              )}
             </div>
+
+            {/* Core fields */}
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <Input value={userForm.target} onChange={(event) => setUserForm((prev) => ({ ...prev, target: event.target.value }))} placeholder="username" disabled={userActionLoading} />
-              <Input value={userForm.rename_to} onChange={(event) => setUserForm((prev) => ({ ...prev, rename_to: event.target.value }))} placeholder="rename to (optional)" disabled={userActionLoading || userFormMode === "create"} />
-              <Input value={userForm.home} onChange={(event) => setUserForm((prev) => ({ ...prev, home: event.target.value }))} placeholder="/home/username" disabled={userActionLoading} />
-              <Input value={userForm.shell} onChange={(event) => setUserForm((prev) => ({ ...prev, shell: event.target.value }))} placeholder="/bin/bash" disabled={userActionLoading} />
-              <Input value={userForm.groups} onChange={(event) => setUserForm((prev) => ({ ...prev, groups: event.target.value }))} placeholder="sudo, docker" disabled={userActionLoading} />
-              <div className="flex items-center gap-3 rounded-xl border border-zinc-200/70 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-800/70 dark:text-zinc-300">
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Username *</label>
+                <Input
+                  value={userForm.target}
+                  onChange={(e) => setUserForm((prev) => ({ ...prev, target: e.target.value }))}
+                  placeholder="e.g. deploy"
+                  disabled={userActionLoading || userFormMode === "edit"}
+                />
+              </div>
+              {userFormMode === "edit" && (
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Rename to</label>
+                  <Input
+                    value={userForm.rename_to}
+                    onChange={(e) => setUserForm((prev) => ({ ...prev, rename_to: e.target.value }))}
+                    placeholder="new username (optional)"
+                    disabled={userActionLoading}
+                  />
+                </div>
+              )}
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Home directory</label>
+                <Input
+                  value={userForm.home}
+                  onChange={(e) => setUserForm((prev) => ({ ...prev, home: e.target.value }))}
+                  placeholder="/home/username"
+                  disabled={userActionLoading}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Shell</label>
+                <Input
+                  value={userForm.shell}
+                  onChange={(e) => setUserForm((prev) => ({ ...prev, shell: e.target.value }))}
+                  placeholder="/bin/bash"
+                  disabled={userActionLoading}
+                />
+              </div>
+
+              {/* Password */}
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                  Password 🔥
+                </label>
+                <Input
+                  type="password"
+                  value={userForm.password}
+                  onChange={(e) => setUserForm((prev) => ({ ...prev, password: e.target.value }))}
+                  placeholder="leave blank to skip"
+                  disabled={userActionLoading}
+                />
+              </div>
+
+              {/* Groups multi-select */}
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                  Groups ({groupOptions.length} available)
+                </label>
+                <MultiGroupSelect
+                  options={groupOptions}
+                  selected={userForm.groups}
+                  onChange={(next) => setUserForm((prev) => ({ ...prev, groups: next }))}
+                  disabled={userActionLoading}
+                />
+              </div>
+            </div>
+
+            {/* SSH key field */}
+            <div className="mt-3">
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                SSH Public Key 🔥 <span className="normal-case font-normal text-zinc-400">(optional — will be appended to authorized_keys)</span>
+              </label>
+              <textarea
+                rows={3}
+                value={userForm.ssh_key}
+                onChange={(e) => setUserForm((prev) => ({ ...prev, ssh_key: e.target.value }))}
+                placeholder="ssh-ed25519 AAAA... or ssh-rsa AAAA..."
+                disabled={userActionLoading}
+                className="w-full rounded-xl border border-zinc-200/60 bg-zinc-50 px-3 py-2 font-mono text-xs text-zinc-700 outline-none transition focus:border-indigo-400/60 dark:border-zinc-800/60 dark:bg-zinc-950 dark:text-zinc-200"
+              />
+            </div>
+
+            {/* Flags row */}
+            <div className="mt-3 flex flex-wrap items-center gap-4">
+              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-zinc-600 dark:text-zinc-300 select-none">
                 <input
                   type="checkbox"
                   checked={userForm.remove_home}
-                  onChange={(event) => setUserForm((prev) => ({ ...prev, remove_home: event.target.checked }))}
-                  className="h-4 w-4"
+                  onChange={(e) => setUserForm((prev) => ({ ...prev, remove_home: e.target.checked }))}
+                  className="h-4 w-4 accent-indigo-500"
                   disabled={userActionLoading}
                 />
-                Remove home when deleting
-              </div>
+                Remove home on delete
+              </label>
             </div>
-            {availableGroupNames.length > 0 ? (
-              <div className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
-                Available groups: {availableGroupNames.slice(0, 10).join(", ")}
-                {availableGroupNames.length > 10 ? "..." : ""}
-              </div>
-            ) : null}
+
+            {/* Advanced section */}
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => setShowUserAdvanced((prev) => !prev)}
+                className="inline-flex items-center gap-1.5 text-[12px] font-medium text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition"
+              >
+                <Settings2 size={13} />
+                {showUserAdvanced ? "Hide" : "Show"} advanced options
+                {showUserAdvanced ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+              {showUserAdvanced && (
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3 dark:border-zinc-800/60 dark:bg-zinc-900/40">
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">UID (advanced)</label>
+                    <Input
+                      value={userForm.uid}
+                      onChange={(e) => setUserForm((prev) => ({ ...prev, uid: e.target.value }))}
+                      placeholder="auto-assigned if blank"
+                      disabled={userActionLoading}
+                      type="number"
+                    />
+                  </div>
+                  <div className="flex flex-col justify-end">
+                    <label className="flex cursor-pointer items-center gap-2 text-[13px] text-zinc-600 dark:text-zinc-300 select-none">
+                      <input
+                        type="checkbox"
+                        checked={userForm.system}
+                        onChange={(e) => setUserForm((prev) => ({ ...prev, system: e.target.checked }))}
+                        className="h-4 w-4 accent-indigo-500"
+                        disabled={userActionLoading}
+                      />
+                      System user <span className="text-[11px] text-zinc-400">(UID &lt; 1000, no-login shell)</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="mt-4 flex gap-2">
               <Button variant="primary" onClick={() => void submitUserAction()} disabled={!userForm.target.trim() || userActionLoading}>
                 {userActionLoading ? <RefreshCw size={14} className="mr-2 animate-spin" /> : <Plus size={14} className="mr-2" />}
@@ -378,11 +622,12 @@ export default function ServerUsers() {
             </div>
           </div>
 
+          {/* User table */}
           <div className="overflow-hidden rounded-xl border border-zinc-200/60 bg-white shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-700 dark:border-zinc-800/60 dark:bg-[#121212]">
             <div className="border-b border-zinc-200/60 p-4 dark:border-zinc-800/60">
               <div className="relative max-w-md">
                 <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={15} />
-                <Input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search by username, UID, shell, home..." className="pl-10" />
+                <Input value={userSearch} onChange={(e) => setUserSearch(e.target.value)} placeholder="Search by username, UID, shell, home…" className="pl-10" />
               </div>
             </div>
             <Table>
@@ -399,9 +644,7 @@ export default function ServerUsers() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-[13px] font-medium text-zinc-500 animate-pulse">
-                      Loading users...
-                    </TableCell>
+                    <TableCell colSpan={6} className="py-8 text-center text-[13px] font-medium text-zinc-500 animate-pulse">Loading users…</TableCell>
                   </TableRow>
                 ) : filteredUsers.length === 0 ? (
                   <TableRow>
@@ -425,12 +668,10 @@ export default function ServerUsers() {
                       <TableCell>
                         <div className="flex gap-2">
                           <Button variant="outline" size="sm" onClick={() => editUser(user)}>
-                            <Pencil size={14} className="mr-1" />
-                            Edit
+                            <Pencil size={14} className="mr-1" />Edit
                           </Button>
                           <Button variant="danger" size="sm" onClick={() => setDeleteUserCandidate(user.username)}>
-                            <Trash2 size={14} className="mr-1" />
-                            Delete
+                            <Trash2 size={14} className="mr-1" />Delete
                           </Button>
                         </div>
                       </TableCell>
@@ -442,6 +683,7 @@ export default function ServerUsers() {
           </div>
         </TabsContent>
 
+        {/* ─────────── GROUPS TAB ─────────── */}
         <TabsContent value="groups">
           <div className="mb-4 rounded-xl border border-zinc-200/60 bg-white p-4 shadow-sm dark:border-zinc-800/60 dark:bg-[#121212]">
             <div className="mb-4 flex items-center justify-between">
@@ -450,18 +692,73 @@ export default function ServerUsers() {
                   {groupFormMode === "create" ? "Add group" : `Edit group ${groupForm.target}`}
                 </div>
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Bạn có thể tạo group mới, đổi tên group, hoặc chỉnh member list trực tiếp từ đây.
+                  Create groups, rename them, or update member lists directly on the node.
                 </div>
               </div>
-              {groupFormMode === "edit" ? (
+              {groupFormMode === "edit" && (
                 <Button variant="outline" onClick={resetGroupForm}>Cancel Edit</Button>
-              ) : null}
+              )}
             </div>
+
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <Input value={groupForm.target} onChange={(event) => setGroupForm((prev) => ({ ...prev, target: event.target.value }))} placeholder="group name" disabled={groupActionLoading} />
-              <Input value={groupForm.rename_to} onChange={(event) => setGroupForm((prev) => ({ ...prev, rename_to: event.target.value }))} placeholder="rename to (optional)" disabled={groupActionLoading || groupFormMode === "create"} />
-              <Input value={groupForm.members} onChange={(event) => setGroupForm((prev) => ({ ...prev, members: event.target.value }))} placeholder="alice, bob, deploy" disabled={groupActionLoading} />
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Group name *</label>
+                <Input
+                  value={groupForm.target}
+                  onChange={(e) => setGroupForm((prev) => ({ ...prev, target: e.target.value }))}
+                  placeholder="e.g. docker"
+                  disabled={groupActionLoading || groupFormMode === "edit"}
+                />
+              </div>
+              {groupFormMode === "edit" && (
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Rename to</label>
+                  <Input
+                    value={groupForm.rename_to}
+                    onChange={(e) => setGroupForm((prev) => ({ ...prev, rename_to: e.target.value }))}
+                    placeholder="new name (optional)"
+                    disabled={groupActionLoading}
+                  />
+                </div>
+              )}
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Members (comma-separated)</label>
+                <Input
+                  value={groupForm.members}
+                  onChange={(e) => setGroupForm((prev) => ({ ...prev, members: e.target.value }))}
+                  placeholder="alice, bob, deploy"
+                  disabled={groupActionLoading}
+                />
+              </div>
             </div>
+
+            {/* Advanced */}
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => setShowGroupAdvanced((prev) => !prev)}
+                className="inline-flex items-center gap-1.5 text-[12px] font-medium text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition"
+              >
+                <Settings2 size={13} />
+                {showGroupAdvanced ? "Hide" : "Show"} advanced options
+                {showGroupAdvanced ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+              {showGroupAdvanced && (
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3 dark:border-zinc-800/60 dark:bg-zinc-900/40">
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">GID (advanced)</label>
+                    <Input
+                      value={groupForm.gid}
+                      onChange={(e) => setGroupForm((prev) => ({ ...prev, gid: e.target.value }))}
+                      placeholder="auto-assigned if blank"
+                      disabled={groupActionLoading}
+                      type="number"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="mt-4 flex gap-2">
               <Button variant="primary" onClick={() => void submitGroupAction()} disabled={!groupForm.target.trim() || groupActionLoading}>
                 {groupActionLoading ? <RefreshCw size={14} className="mr-2 animate-spin" /> : <Plus size={14} className="mr-2" />}
@@ -474,7 +771,7 @@ export default function ServerUsers() {
             <div className="border-b border-zinc-200/60 p-4 dark:border-zinc-800/60">
               <div className="relative max-w-md">
                 <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={15} />
-                <Input value={groupSearch} onChange={(event) => setGroupSearch(event.target.value)} placeholder="Search by group, GID, member..." className="pl-10" />
+                <Input value={groupSearch} onChange={(e) => setGroupSearch(e.target.value)} placeholder="Search by group, GID, member…" className="pl-10" />
               </div>
             </div>
             <Table>
@@ -489,9 +786,7 @@ export default function ServerUsers() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-8 text-center text-[13px] font-medium text-zinc-500 animate-pulse">
-                      Loading groups...
-                    </TableCell>
+                    <TableCell colSpan={4} className="py-8 text-center text-[13px] font-medium text-zinc-500 animate-pulse">Loading groups…</TableCell>
                   </TableRow>
                 ) : filteredGroups.length === 0 ? (
                   <TableRow>
@@ -523,12 +818,10 @@ export default function ServerUsers() {
                       <TableCell>
                         <div className="flex gap-2">
                           <Button variant="outline" size="sm" onClick={() => editGroup(group)}>
-                            <Pencil size={14} className="mr-1" />
-                            Edit
+                            <Pencil size={14} className="mr-1" />Edit
                           </Button>
                           <Button variant="danger" size="sm" onClick={() => setDeleteGroupCandidate(group.name)}>
-                            <Trash2 size={14} className="mr-1" />
-                            Delete
+                            <Trash2 size={14} className="mr-1" />Delete
                           </Button>
                         </div>
                       </TableCell>
@@ -540,6 +833,7 @@ export default function ServerUsers() {
           </div>
         </TabsContent>
       </Tabs>
+
       <ConfirmActionDialog
         open={!!deleteUserCandidate}
         title="Delete system user?"
@@ -571,10 +865,7 @@ export default function ServerUsers() {
 }
 
 function splitCsv(value: string): string[] {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function normalizeUsers(value: unknown): ServerUserRow[] {

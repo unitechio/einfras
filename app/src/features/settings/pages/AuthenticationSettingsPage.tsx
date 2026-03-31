@@ -147,7 +147,7 @@ export default function AuthenticationSettingsPage() {
 
   return (
     <div className="space-y-6 pb-20">
-      <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 p-8 text-white shadow-sm dark:border-zinc-800">
+      <section className="overflow-hidden rounded-md border border-zinc-200 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 p-8 text-white shadow-sm dark:border-zinc-800">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="max-w-2xl">
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-cyan-200">
@@ -162,7 +162,7 @@ export default function AuthenticationSettingsPage() {
               keep the recovery codes safe for incident response.
             </p>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 backdrop-blur">
+          <div className="rounded-md border border-white/10 bg-white/5 px-5 py-4 backdrop-blur">
             <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
               Current state
             </div>
@@ -177,9 +177,9 @@ export default function AuthenticationSettingsPage() {
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <section className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
+        <section className="rounded-md border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-400">
+            <div className="flex h-12 w-12 items-center justify-center rounded-md bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-400">
               <Smartphone className="h-6 w-6" />
             </div>
             <div>
@@ -194,7 +194,7 @@ export default function AuthenticationSettingsPage() {
           </div>
 
           {!setupToken ? (
-            <div className="mt-8 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-6 py-12 text-center dark:border-zinc-800 dark:bg-zinc-950/50">
+            <div className="mt-8 rounded-md border border-dashed border-zinc-300 bg-zinc-50 px-6 py-12 text-center dark:border-zinc-800 dark:bg-zinc-950/50">
               <QrCode className="mx-auto h-12 w-12 text-zinc-400 dark:text-zinc-600" />
               <h3 className="mt-4 text-base font-semibold text-zinc-900 dark:text-zinc-50">
                 Generate a fresh MFA enrollment
@@ -214,7 +214,7 @@ export default function AuthenticationSettingsPage() {
             </div>
           ) : (
             <div className="mt-8 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-              <div className="rounded-2xl border border-zinc-200 bg-slate-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
+              <div className="rounded-md border border-zinc-200 bg-slate-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
                 <div className="rounded-[1.5rem] bg-white p-4 shadow-sm dark:bg-[#121212]">
                   {qrImage ? (
                     <img
@@ -255,7 +255,7 @@ export default function AuthenticationSettingsPage() {
                   ].map((item) => (
                     <div
                       key={item.step}
-                      className="rounded-2xl border border-zinc-200 bg-white px-4 py-4 shadow-sm dark:border-zinc-800 dark:bg-[#121212]"
+                      className="rounded-md border border-zinc-200 bg-white px-4 py-4 shadow-sm dark:border-zinc-800 dark:bg-[#121212]"
                     >
                       <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-500">
                         {item.step}
@@ -270,7 +270,7 @@ export default function AuthenticationSettingsPage() {
                   ))}
                 </div>
 
-                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
+                <div className="rounded-md border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
@@ -295,7 +295,7 @@ export default function AuthenticationSettingsPage() {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
+                <div className="rounded-md border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
@@ -313,7 +313,7 @@ export default function AuthenticationSettingsPage() {
                         void copyText(
                           "Recovery codes",
                           recoveryCodes.join("\n"),
-                         )
+                        )
                       }
                       className="dark:border-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700"
                     >
@@ -333,7 +333,7 @@ export default function AuthenticationSettingsPage() {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-[#121212]">
+                <div className="rounded-md border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-[#121212]">
                   <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
                     Confirm setup code
                   </label>
@@ -358,9 +358,9 @@ export default function AuthenticationSettingsPage() {
           )}
         </section>
 
-        <section className="space-y-6 rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
+        <section className="space-y-6 rounded-md border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+            <div className="flex h-12 w-12 items-center justify-center rounded-md bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
               <Mail className="h-6 w-6" />
             </div>
             <div>
@@ -373,7 +373,7 @@ export default function AuthenticationSettingsPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
+          <div className="rounded-md border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
             <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
               Account email
             </label>
@@ -394,7 +394,7 @@ export default function AuthenticationSettingsPage() {
             </Button>
           </div>
 
-          <div className="rounded-2xl border border-zinc-200 bg-slate-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/20">
+          <div className="rounded-md border border-zinc-200 bg-slate-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/20">
             <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
               <KeyRound className="h-4 w-4 text-indigo-500" />
               What this security flow covers
@@ -419,7 +419,7 @@ export default function AuthenticationSettingsPage() {
             </ul>
           </div>
 
-          <div className="rounded-2xl border border-cyan-200 bg-cyan-50 p-5 dark:border-cyan-500/20 dark:bg-cyan-500/10">
+          <div className="rounded-md border border-cyan-200 bg-cyan-50 p-5 dark:border-cyan-500/20 dark:bg-cyan-500/10">
             <div className="text-sm font-semibold text-cyan-950 dark:text-cyan-50">
               Operator note
             </div>

@@ -126,7 +126,9 @@ export default function ContainerDetailPage() {
         }
         try {
             const parsed = JSON.parse(raw) as { sessions: DockerTerminalWorkspaceSession[]; activeTabId?: string };
-            const restored = (parsed.sessions || []).filter((item) => item.environmentId === environmentId && item.containerId === containerId);
+            const restored = (parsed.sessions || [])
+                .filter((item) => item.environmentId === environmentId && item.containerId === containerId)
+                .map((item) => ({ ...item, sessionId: undefined }));
             setTerminalSessions(restored);
             setActiveTerminalTabId(parsed.activeTabId && restored.some((item) => item.tabId === parsed.activeTabId) ? parsed.activeTabId : (restored[0]?.tabId || ""));
         } catch {
@@ -143,7 +145,10 @@ export default function ContainerDetailPage() {
             window.sessionStorage.removeItem(storageKey);
             return;
         }
-        window.sessionStorage.setItem(storageKey, JSON.stringify({ sessions: terminalSessions, activeTabId: activeTerminalTabId }));
+        window.sessionStorage.setItem(storageKey, JSON.stringify({
+            sessions: terminalSessions.map(({ sessionId: _sessionId, ...item }) => item),
+            activeTabId: activeTerminalTabId,
+        }));
     }, [activeTerminalTabId, containerId, environmentId, terminalSessions]);
 
     const openTerminalWorkspace = () => {
@@ -564,7 +569,18 @@ export default function ContainerDetailPage() {
                 }}
                 onUpdateSession={(tabId, patch) => {
                     setTerminalSessions((current) =>
-                        current.map((item) => (item.tabId === tabId ? { ...item, ...patch } : item)),
+                        current.map((item) => {
+                            if (item.tabId !== tabId) {
+                                return item;
+                            }
+                            const next = { ...item, ...patch };
+                            return next.sessionId === item.sessionId &&
+                                next.containerId === item.containerId &&
+                                next.containerName === item.containerName &&
+                                next.environmentId === item.environmentId
+                                ? item
+                                : next;
+                        }),
                     );
                 }}
                 onAddTab={(cId, cName, envId) => {

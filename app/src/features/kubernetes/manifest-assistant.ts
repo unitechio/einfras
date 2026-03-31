@@ -8,7 +8,7 @@ export type AssistedFormState = {
   serviceType: string;
   targetPort: string;
   selector: string;
-  configEntries: string;
+  configEntries: Array<{ id: string; key: string; value: string }>;
   host: string;
   path: string;
   serviceName: string;
@@ -31,7 +31,7 @@ export function extractManifestValue(manifest: string, pattern: RegExp): string 
 
 export function hydrateManifest(
   manifest: string,
-  fields: { resourceName: string; namespace: string; labels: string; tags: string[] },
+  fields: { resourceName: string; namespace: string; labels: Array<{ id: string; key: string; value: string }>; tags: string[] },
 ): string {
   let next = manifest;
   if (fields.resourceName.trim()) {
@@ -42,9 +42,8 @@ export function hydrateManifest(
   }
   const mergedLabels = [
     ...fields.labels
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean),
+      .filter((l) => l.key.trim())
+      .map((l) => `${l.key.trim()}=${l.value.trim()}`),
     ...fields.tags.map((tag) => `einfra.io/tag-${slugifyK8sLabel(tag)}=true`),
   ];
   if (mergedLabels.length) {
@@ -74,14 +73,41 @@ export function slugifyK8sLabel(value: string) {
 }
 
 export function replaceOrInsertMetadataValue(manifest: string, key: string, value: string): string {
-  const pattern = new RegExp(`^(\\s*${key}:\\s*).+$`, "m");
-  if (pattern.test(manifest)) {
-    return manifest.replace(pattern, `$1${value}`);
+  const normalized = manifest.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+  const metadataIndex = lines.findIndex((line) => /^\s*metadata:\s*$/.test(line));
+
+  if (metadataIndex === -1) {
+    return `metadata:\n  ${key}: ${value}\n${normalized}`;
   }
-  if (/^\s*metadata:\s*$/m.test(manifest)) {
-    return manifest.replace(/^\s*metadata:\s*$/m, `metadata:\n  ${key}: ${value}`);
+
+  const metadataIndent = lines[metadataIndex].match(/^\s*/)?.[0].length ?? 0;
+  const fieldIndent = metadataIndent + 2;
+  let metadataEndIndex = lines.length;
+
+  for (let index = metadataIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const indent = line.match(/^\s*/)?.[0].length ?? 0;
+    if (indent <= metadataIndent) {
+      metadataEndIndex = index;
+      break;
+    }
   }
-  return `metadata:\n  ${key}: ${value}\n${manifest}`;
+
+  const fieldPattern = new RegExp(`^\\s{${fieldIndent}}${key}:\\s*.*$`);
+  for (let index = metadataIndex + 1; index < metadataEndIndex; index += 1) {
+    if (fieldPattern.test(lines[index])) {
+      lines[index] = `${" ".repeat(fieldIndent)}${key}: ${value}`;
+      return lines.join("\n");
+    }
+  }
+
+  lines.splice(metadataEndIndex, 0, `${" ".repeat(fieldIndent)}${key}: ${value}`);
+  return lines.join("\n");
 }
 
 export function getResourceGuide(title: string, manifest: string): ResourceGuide {
@@ -331,7 +357,7 @@ metadata:
   name: ${name}
   namespace: ${namespace}
 data:
-${toKeyValueYaml(form.configEntries, 2)}
+${generateConfigMapDataYaml(form.configEntries)}
 `;
     case "Secret":
       return `apiVersion: v1
@@ -360,16 +386,59 @@ function toSecretYaml(value: string) {
     .join("\n");
 }
 
-function extractConfigEntries(manifest: string) {
-  const match = manifest.match(/data:\n([\s\S]+)$/m);
+function extractConfigEntries(manifest: string): Array<{ id: string; key: string; value: string }> {
+  const match = manifest.match(/^data:\n([\s\S]+?)(?:^\w|$)/m) || manifest.match(/data:\n([\s\S]+)$/m);
   if (!match?.[1]) {
-    return "APP_ENV=production\nAPP_NAME=einfra";
+    return [
+      { id: crypto.randomUUID?.() || Math.random().toString(), key: "APP_ENV", value: "production" },
+      { id: crypto.randomUUID?.() || Math.random().toString(), key: "APP_NAME", value: "einfra" },
+    ];
   }
-  return match[1]
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.includes(":"))
-    .map((line) => line.replace(":", "="))
+  const lines = match[1].split("\n");
+  const entries: Array<{ id: string; key: string; value: string }> = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const colonIndex = trimmed.indexOf(":");
+    if (colonIndex !== -1) {
+      let key = trimmed.substring(0, colonIndex).trim();
+      let value = trimmed.substring(colonIndex + 1).trim();
+      
+      // Remove surrounding quotes if any
+      if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+        key = key.slice(1, -1);
+      }
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      
+      entries.push({
+        id: crypto.randomUUID?.() || Math.random().toString(),
+        key,
+        value,
+      });
+    }
+  }
+  return entries.length ? entries : [{ id: crypto.randomUUID?.() || Math.random().toString(), key: "", value: "" }];
+}
+
+function generateConfigMapDataYaml(entries: Array<{ id: string; key: string; value: string }>) {
+  const validEntries = entries.filter((e) => e.key.trim());
+  if (validEntries.length === 0) {
+    return '  APP_ENV: "production"';
+  }
+  return validEntries
+    .map((e) => {
+      const k = e.key.trim();
+      // Ensure values are strings without trailing colons and wrapped in double quotes
+      let v = e.value.trim();
+      if (v.endsWith(":")) {
+        v = v.slice(0, -1);
+      }
+      // Re-escape internal double quotes if necessary and wrap
+      const jsonValue = JSON.stringify(v);
+      return `  ${k}: ${jsonValue}`;
+    })
     .join("\n");
 }
 

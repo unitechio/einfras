@@ -238,6 +238,7 @@ func (h *EnvironmentRuntimeHandler) Register(r *mux.Router) {
 	r.HandleFunc("/v1/environments/{id}/docker/autoheal/policies/{policyId}", h.deleteDockerAutoHealPolicy).Methods(http.MethodDelete)
 	r.HandleFunc("/v1/environments/{id}/docker/autoheal/run", h.runDockerAutoHeal).Methods(http.MethodPost)
 	r.HandleFunc("/v1/environments/{id}/docker/disk-usage", h.getDockerDiskUsage).Methods(http.MethodGet)
+	r.HandleFunc("/v1/environments/{id}/docker/system/prune", h.pruneDockerSystem).Methods(http.MethodPost)
 	r.HandleFunc("/v1/environments/{id}/audit", h.listEnvironmentAudit).Methods(http.MethodGet)
 
 	r.HandleFunc("/v1/environments/{id}/kubernetes/pods", h.listKubernetesPods).Methods(http.MethodGet)
@@ -1676,12 +1677,16 @@ func (s *terminalRuntimeSession) close() error {
 }
 
 func (s *terminalRuntimeSession) sendInput(data string) error {
+	return s.sendInputBytes([]byte(data))
+}
+
+func (s *terminalRuntimeSession) sendInputBytes(data []byte) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.done {
 		return io.EOF
 	}
-	_, err := io.WriteString(s.stdin, data)
+	_, err := s.stdin.Write(data)
 	return err
 }
 
@@ -2543,6 +2548,21 @@ func (h *EnvironmentRuntimeHandler) runDockerAutoHeal(w http.ResponseWriter, r *
 	writeJSON(w, http.StatusOK, items)
 }
 
+func (h *EnvironmentRuntimeHandler) pruneDockerSystem(w http.ResponseWriter, r *http.Request) {
+	environmentID := mux.Vars(r)["id"]
+	if _, err := h.requireLocalEnvironment(r.Context(), environmentID, "docker"); err != nil {
+		writeError(w, http.StatusBadRequest, "environment_runtime", "docker.system.prune", "unsupported_environment", err.Error(), nil)
+		return
+	}
+	if err := collector.PruneDockerSystem(); err != nil {
+		_ = h.auditEnvironmentAction(r, environmentID, "docker.system.prune", "environment", environmentID, "failed", err.Error(), nil)
+		writeError(w, http.StatusBadGateway, "environment_runtime", "docker.system.prune", "docker_system_prune_failed", err.Error(), nil)
+		return
+	}
+	_ = h.auditEnvironmentAction(r, environmentID, "docker.system.prune", "environment", environmentID, "success", "System space reclaimed successfully", nil)
+	writeJSON(w, http.StatusOK, map[string]any{"message": "System space reclaimed successfully"})
+}
+
 func (h *EnvironmentRuntimeHandler) getDockerDiskUsage(w http.ResponseWriter, r *http.Request) {
 	environmentID := mux.Vars(r)["id"]
 	if _, err := h.requireLocalEnvironment(r.Context(), environmentID, "docker"); err != nil {
@@ -3004,38 +3024,84 @@ func (h *EnvironmentRuntimeHandler) attachTerminalRuntimeSession(w http.Response
 
 func (h *EnvironmentRuntimeHandler) handleTerminalWSInput(conn *websocket.Conn, session *terminalRuntimeSession, r *http.Request) error {
 	for {
-		var message struct {
-			Type string `json:"type"`
-			Data string `json:"data"`
-		}
-		if err := conn.ReadJSON(&message); err != nil {
+		messageType, payload, err := conn.ReadMessage()
+		if err != nil {
 			return err
 		}
-		switch strings.ToLower(strings.TrimSpace(message.Type)) {
-		case "close":
-			if err := session.close(); err != nil {
+		switch messageType {
+		case websocket.BinaryMessage:
+			if len(payload) == 0 {
+				continue
+			}
+			if err := session.sendInputBytes(payload); err != nil {
 				return err
 			}
-			return nil
-		case "input":
-			if err := session.sendInput(message.Data); err != nil {
-				return err
-			}
-			for _, command := range session.popExecutedCommands(message.Data) {
+			for _, command := range session.popExecutedCommands(string(payload)) {
 				h.auditTerminalCommand(r, session, command)
 			}
-		case "resize":
-			var resize struct {
-				Cols uint16 `json:"cols"`
-				Rows uint16 `json:"rows"`
+		case websocket.TextMessage:
+			var message struct {
+				Type string          `json:"type"`
+				Data json.RawMessage `json:"data"`
+				Cols uint16          `json:"cols"`
+				Rows uint16          `json:"rows"`
 			}
-			if err := json.Unmarshal([]byte(message.Data), &resize); err == nil && resize.Cols > 0 && resize.Rows > 0 {
-				if err := session.resizeTerminal(resize.Cols, resize.Rows); err != nil {
+			if err := json.Unmarshal(payload, &message); err != nil {
+				if err := session.sendInputBytes(payload); err != nil {
 					return err
+				}
+				for _, command := range session.popExecutedCommands(string(payload)) {
+					h.auditTerminalCommand(r, session, command)
+				}
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(message.Type)) {
+			case "close":
+				if err := session.close(); err != nil {
+					return err
+				}
+				return nil
+			case "input":
+				data := decodeTerminalInputPayload(message.Data)
+				if len(data) == 0 {
+					continue
+				}
+				if err := session.sendInputBytes(data); err != nil {
+					return err
+				}
+				for _, command := range session.popExecutedCommands(string(data)) {
+					h.auditTerminalCommand(r, session, command)
+				}
+			case "resize":
+				cols, rows := message.Cols, message.Rows
+				if cols == 0 || rows == 0 {
+					var resize struct {
+						Cols uint16 `json:"cols"`
+						Rows uint16 `json:"rows"`
+					}
+					if err := json.Unmarshal(message.Data, &resize); err == nil {
+						cols, rows = resize.Cols, resize.Rows
+					}
+				}
+				if cols > 0 && rows > 0 {
+					if err := session.resizeTerminal(cols, rows); err != nil {
+						return err
+					}
 				}
 			}
 		}
 	}
+}
+
+func decodeTerminalInputPayload(payload json.RawMessage) []byte {
+	if len(payload) == 0 || string(payload) == "null" {
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(payload, &text); err == nil {
+		return []byte(text)
+	}
+	return append([]byte(nil), payload...)
 }
 
 func (h *EnvironmentRuntimeHandler) auditTerminalCommand(r *http.Request, session *terminalRuntimeSession, command string) {

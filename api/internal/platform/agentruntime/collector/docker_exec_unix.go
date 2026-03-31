@@ -16,7 +16,7 @@ type nopWriteCloser struct {
 func (n nopWriteCloser) Close() error { return nil }
 
 func startDockerExecPTYSession(containerID string, shellCommand []string) (*DockerExecSession, error) {
-	args := []string{"exec", "-it", containerID}
+	args := []string{"exec", "-it", "-e", "TERM=xterm-256color", containerID}
 	args = append(args, shellCommand...)
 	cmd := exec.Command("docker", args...)
 	ttyFile, err := pty.Start(cmd)
@@ -40,7 +40,7 @@ func startDockerExecPTYSession(containerID string, shellCommand []string) (*Dock
 }
 
 func startDockerExecPipeSession(containerID string, shellCommand []string) (*DockerExecSession, error) {
-	args := []string{"exec", "-i", containerID}
+	args := []string{"exec", "-i", "-e", "TERM=xterm-256color", containerID}
 	args = append(args, shellCommand...)
 	cmd := exec.Command("docker", args...)
 	stdin, err := cmd.StdinPipe()

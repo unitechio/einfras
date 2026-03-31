@@ -125,6 +125,8 @@ func (m *ControlManager) AccessAction(ctx context.Context, serverID, userID, act
 	case "delete-group":
 	case "list-ssh-keys":
 	case "add-ssh-key":
+	case "delete-ssh-key":
+	case "generate-ssh-key":
 	default:
 		return nil, fmt.Errorf("unsupported access action %q", action)
 	}
@@ -134,6 +136,7 @@ func (m *ControlManager) AccessAction(ctx context.Context, serverID, userID, act
 		"payload": payload,
 	}, 180, commandKey("access", serverID, action, target))
 }
+
 
 func (m *ControlManager) ConfigAction(ctx context.Context, serverID, userID, action, target, payload string) (*agent.Command, error) {
 	switch action {

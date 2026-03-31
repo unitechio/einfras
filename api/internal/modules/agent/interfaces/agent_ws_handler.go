@@ -14,6 +14,7 @@ import (
 	agentregistry "einfra/api/internal/modules/agent/application"
 	"einfra/api/internal/modules/agent/domain"
 	"einfra/api/internal/platform/loggingx"
+	serverdomain "einfra/api/internal/modules/server/domain"
 )
 
 var upgrader = websocket.Upgrader{
@@ -44,6 +45,7 @@ type AgentWSHandler struct {
 	agentRepo  AgentRepository
 	tokenSvc   AgentTokenValidator // nil = auth disabled (dev mode only)
 	observer   HeartbeatObserver
+	serverRepo serverdomain.ServerRepository // optional: updates server status on connect/disconnect
 }
 
 // NewAgentWSHandler creates a new handler.
@@ -62,6 +64,14 @@ func NewAgentWSHandler(
 		tokenSvc:   tokenSvc,
 		observer:   observer,
 	}
+}
+
+// WithServerRepository wires the server repository so the WS handler can
+// automatically transition a server from any non-online status to "online"
+// when its agent first connects, and back to "offline" when it disconnects.
+func (h *AgentWSHandler) WithServerRepository(repo serverdomain.ServerRepository) *AgentWSHandler {
+	h.serverRepo = repo
+	return h
 }
 
 // HandleAgentWS is the HTTP handler for: GET /ws/agent/{server_id}
@@ -101,6 +111,9 @@ func (h *AgentWSHandler) HandleAgentWS(w http.ResponseWriter, r *http.Request) {
 		"remote": r.RemoteAddr,
 	})
 
+	// Promote server status: pending/offline → online when agent first connects.
+	h.promoteServerOnline(r.Context(), serverID)
+
 	// Notify clients that this server came online
 	h.hub.BroadcastToClients(serverID, map[string]any{
 		"type":      "AGENT_ONLINE",
@@ -113,6 +126,10 @@ func (h *AgentWSHandler) HandleAgentWS(w http.ResponseWriter, r *http.Request) {
 		h.hub.UnregisterAgent(serverID)
 		_ = h.agentRepo.SetOnline(serverID, false)
 		loggingx.New("agent-ws").Info(log.Logger, "ws-connection", serverID, "disconnected", map[string]any{})
+		// Mark server offline on disconnect
+		if h.serverRepo != nil {
+			_ = h.serverRepo.UpdateStatus(context.Background(), serverID, serverdomain.ServerStatusOffline)
+		}
 		h.hub.BroadcastToClients(serverID, map[string]any{
 			"type":      "AGENT_OFFLINE",
 			"server_id": serverID,
@@ -163,6 +180,38 @@ func (h *AgentWSHandler) HandleAgentWS(w http.ResponseWriter, r *http.Request) {
 		default:
 			h.dispatcher.HandleAgentMessage(serverID, msg)
 		}
+	}
+}
+
+// promoteServerOnline transitions server status to "online" when the agent
+// connects for the first time (i.e. the server was in pending/offline/error state).
+// It also marks the onboarding_status as "installed" if it was still "pending" or "ready".
+func (h *AgentWSHandler) promoteServerOnline(ctx context.Context, serverID string) {
+	if h.serverRepo == nil {
+		return
+	}
+	server, err := h.serverRepo.GetByID(ctx, serverID)
+	if err != nil || server == nil {
+		return
+	}
+	// Always bring the status to online when the agent is connected.
+	if server.Status != serverdomain.ServerStatusOnline {
+		if updateErr := h.serverRepo.UpdateStatus(ctx, serverID, serverdomain.ServerStatusOnline); updateErr != nil {
+			loggingx.New("agent-ws").Warn(log.Logger, "ws-status", serverID, "status-update-failed", map[string]any{
+				"reason": updateErr.Error(),
+			})
+		} else {
+			loggingx.New("agent-ws").Info(log.Logger, "ws-status", serverID, "promoted-online", map[string]any{
+				"prev_status":       server.Status,
+				"onboarding_status": server.OnboardingStatus,
+			})
+		}
+	}
+	// If the server's onboarding_status was still pending/ready, mark it as installed.
+	if server.OnboardingStatus == serverdomain.ServerOnboardingStatusPending ||
+		server.OnboardingStatus == serverdomain.ServerOnboardingStatusReady {
+		server.OnboardingStatus = serverdomain.ServerOnboardingStatusInstalled
+		_ = h.serverRepo.Update(ctx, server)
 	}
 }
 

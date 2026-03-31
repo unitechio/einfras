@@ -170,7 +170,28 @@ export interface DockerFileEntry {
   size: number;
   mode: string;
   is_dir: boolean;
+  is_link: boolean;
   modified: string;
+}
+
+export interface DockerDiskUsageObject {
+  type: string;
+  total_count: number;
+  active_count: number;
+  size: number;
+  reclaimable: number;
+  reclaim_pct: number;
+}
+
+export interface DockerDiskUsage {
+  layers_size: number;
+  images: DockerDiskUsageObject[];
+  containers: DockerDiskUsageObject[];
+  volumes: DockerDiskUsageObject[];
+  build_cache: DockerDiskUsageObject[];
+  total_size: number;
+  reclaimable: number;
+  objects: DockerDiskUsageObject[];
 }
 
 export interface DockerContainerStats {

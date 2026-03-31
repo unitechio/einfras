@@ -96,6 +96,10 @@ func (e *ControlExecutor) Execute(ctx context.Context, operation string, params 
 		return e.listSSHKeys(params)
 	case "access.add-ssh-key":
 		return e.addSSHKey(params)
+	case "access.delete-ssh-key":
+		return e.deleteSSHKey(ctx, params)
+	case "access.generate-ssh-key":
+		return e.generateSSHKey(ctx, params)
 	case "config.read":
 		return e.configRead(params)
 	case "config.write":
@@ -558,21 +562,10 @@ func (e *ControlExecutor) addSSHKey(params map[string]any) (string, int, error) 
 	if payload == "" {
 		return "", 1, errors.New("payload is required")
 	}
-	sshDir := filepath.Join(homeDirForUser(target), ".ssh")
-	resolvedDir, err := e.validatePath(sshDir, true, e.allowedWriteRoots)
-	if err != nil {
+	if err := validateSSHPublicKeyFormat(payload); err != nil {
 		return "", 1, err
 	}
-	if err := os.MkdirAll(resolvedDir, 0o700); err != nil {
-		return "", 1, err
-	}
-	authPath := filepath.Join(resolvedDir, "authorized_keys")
-	f, err := os.OpenFile(authPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return "", 1, err
-	}
-	defer f.Close()
-	if _, err := f.WriteString(payload + "\n"); err != nil {
+	if err := appendAuthorizedKey(e, target, payload); err != nil {
 		return "", 1, err
 	}
 	return marshalResult(agent.TypedControlResult{
@@ -582,6 +575,195 @@ func (e *ControlExecutor) addSSHKey(params map[string]any) (string, int, error) 
 			"target": target,
 		},
 	})
+}
+
+func (e *ControlExecutor) deleteSSHKey(ctx context.Context, params map[string]any) (string, int, error) {
+	target := stringParam(params, "target")
+	if err := validateUserTarget(target); err != nil {
+		return "", 1, err
+	}
+	payloadRaw := strings.TrimSpace(stringParam(params, "payload"))
+	if payloadRaw == "" {
+		return "", 1, errors.New("payload with key_value or line_index is required")
+	}
+	var spec struct {
+		KeyValue  string `json:"key_value"`
+		LineIndex *int   `json:"line_index"`
+	}
+	if err := json.Unmarshal([]byte(payloadRaw), &spec); err != nil {
+		return "", 1, fmt.Errorf("invalid payload json: %w", err)
+	}
+	authPath := filepath.Join(homeDirForUser(target), ".ssh", "authorized_keys")
+	resolvedPath, err := e.validatePath(authPath, true, e.allowedWriteRoots)
+	if err != nil {
+		return "", 1, err
+	}
+	content, err := os.ReadFile(resolvedPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", 1, errors.New("authorized_keys file does not exist")
+		}
+		return "", 1, err
+	}
+	lines := strings.Split(strings.TrimRight(string(content), "\n"), "\n")
+	newLines := make([]string, 0, len(lines))
+	deleted := 0
+	for idx, line := range lines {
+		remove := false
+		if spec.KeyValue != "" && strings.TrimSpace(line) == strings.TrimSpace(spec.KeyValue) {
+			remove = true
+		}
+		if spec.LineIndex != nil && idx == *spec.LineIndex {
+			remove = true
+		}
+		if remove {
+			deleted++
+		} else {
+			newLines = append(newLines, line)
+		}
+	}
+	if deleted == 0 {
+		return "", 1, errors.New("key not found in authorized_keys")
+	}
+	newContent := strings.Join(newLines, "\n")
+	if len(newLines) > 0 {
+		newContent += "\n"
+	}
+	if err := os.WriteFile(resolvedPath, []byte(newContent), 0o600); err != nil {
+		return "", 1, err
+	}
+	return marshalResult(agent.TypedControlResult{
+		Operation: "access.delete-ssh-key",
+		Summary:   fmt.Sprintf("%d key(s) removed from authorized_keys", deleted),
+		Data:      map[string]any{"target": target, "deleted": deleted},
+	})
+}
+
+func (e *ControlExecutor) generateSSHKey(ctx context.Context, params map[string]any) (string, int, error) {
+	target := stringParam(params, "target")
+	if err := validateUserTarget(target); err != nil {
+		return "", 1, err
+	}
+	payloadRaw := strings.TrimSpace(stringParam(params, "payload"))
+	var spec struct {
+		Type    string `json:"type"`
+		Comment string `json:"comment"`
+	}
+	spec.Type = "ed25519"
+	if payloadRaw != "" {
+		_ = json.Unmarshal([]byte(payloadRaw), &spec)
+	}
+	spec.Type = strings.ToLower(strings.TrimSpace(spec.Type))
+	if spec.Type != "ed25519" && spec.Type != "rsa" {
+		spec.Type = "ed25519"
+	}
+	if spec.Comment == "" {
+		spec.Comment = fmt.Sprintf("%s@einfra", target)
+	}
+	sshDir := filepath.Join(homeDirForUser(target), ".ssh")
+	resolvedDir, err := e.validatePath(sshDir, true, e.allowedWriteRoots)
+	if err != nil {
+		return "", 1, err
+	}
+	if err := os.MkdirAll(resolvedDir, 0o700); err != nil {
+		return "", 1, err
+	}
+	keyPath := filepath.Join(resolvedDir, "id_"+spec.Type)
+	genArgs := []string{"ssh-keygen", "-t", spec.Type, "-f", keyPath, "-N", "", "-C", spec.Comment}
+	if spec.Type == "rsa" {
+		genArgs = append(genArgs, "-b", "4096")
+	}
+	if output, exitCode, err := runPrivilegedCommand(ctx, genArgs...); err != nil {
+		return commandFailure("access.generate-ssh-key", "ssh-keygen failed", output, exitCode, err)
+	}
+	// Append the generated public key to authorized_keys
+	pubKeyBytes, err := os.ReadFile(keyPath + ".pub")
+	if err != nil {
+		return "", 1, fmt.Errorf("generated public key not found: %w", err)
+	}
+	pubKey := strings.TrimSpace(string(pubKeyBytes))
+	if appendErr := appendAuthorizedKey(e, target, pubKey); appendErr != nil {
+		return "", 1, appendErr
+	}
+	return marshalResult(agent.TypedControlResult{
+		Operation: "access.generate-ssh-key",
+		Summary:   fmt.Sprintf("%s key pair generated and public key authorized for %s", spec.Type, target),
+		Data: map[string]any{
+			"target":   target,
+			"key_type": spec.Type,
+			"key_path": keyPath,
+			"comment":  spec.Comment,
+		},
+	})
+}
+
+// appendAuthorizedKey writes a validated public key to ~/.ssh/authorized_keys.
+// It creates the .ssh directory with correct permissions (0700) if missing.
+func appendAuthorizedKey(e *ControlExecutor, target, pubKey string) error {
+	if err := validateSSHPublicKeyFormat(pubKey); err != nil {
+		return err
+	}
+	sshDir := filepath.Join(homeDirForUser(target), ".ssh")
+	resolvedDir, err := e.validatePath(sshDir, true, e.allowedWriteRoots)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(resolvedDir, 0o700); err != nil {
+		return err
+	}
+	authPath := filepath.Join(resolvedDir, "authorized_keys")
+	f, err := os.OpenFile(authPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(strings.TrimSpace(pubKey) + "\n")
+	return err
+}
+
+// setPasswordViaPipe sets a Linux user's password by piping "user:pass" to
+// chpasswd via stdin. This avoids the password ever appearing in process args,
+// shell history, or any structured log (it is never part of params map).
+func setPasswordViaPipe(ctx context.Context, username, password string) error {
+	if username == "" || password == "" {
+		return errors.New("username and password are required for chpasswd")
+	}
+	command := "chpasswd"
+	var args []string
+	if runtime.GOOS != "windows" && !runningAsRoot() {
+		if !commandExists("sudo") {
+			return errors.New("agent must run as root or have passwordless sudo to set passwords")
+		}
+		args = []string{"sudo", command}
+	} else {
+		args = []string{command}
+	}
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.Stdin = strings.NewReader(username + ":" + password + "\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("chpasswd failed: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// validateSSHPublicKeyFormat does a lightweight sanity-check on public key strings.
+func validateSSHPublicKeyFormat(key string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return errors.New("ssh public key is empty")
+	}
+	validPrefixes := []string{
+		"ssh-rsa ", "ssh-ed25519 ", "ssh-dss ",
+		"ecdsa-sha2-nistp256 ", "ecdsa-sha2-nistp384 ", "ecdsa-sha2-nistp521 ",
+		"sk-ssh-ed25519@openssh.com ", "sk-ecdsa-sha2-nistp256@openssh.com ",
+	}
+	for _, prefix := range validPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return nil
+		}
+	}
+	return errors.New("invalid SSH public key format: must start with ssh-rsa, ssh-ed25519, ecdsa-sha2-*, etc.")
 }
 
 func (e *ControlExecutor) addUser(ctx context.Context, params map[string]any) (string, int, error) {
@@ -602,18 +784,56 @@ func (e *ControlExecutor) addUser(ctx context.Context, params map[string]any) (s
 	if len(spec.Groups) > 0 {
 		args = append(args, "-G", strings.Join(spec.Groups, ","))
 	}
+	if spec.UID != nil {
+		args = append(args, "-u", strconv.Itoa(*spec.UID))
+	}
+	if spec.System {
+		args = append(args, "--system")
+	}
 	args = append(args, spec.Target)
 	if output, exitCode, err := runPrivilegedCommand(ctx, args...); err != nil {
 		return commandFailure("access.add-user", "user creation failed", output, exitCode, err)
 	}
+
+	// ── Set password securely via chpasswd stdin pipe ────────────────────────
+	// NEVER pass the password as a CLI argument; process args are visible to
+	// other processes via /proc/<pid>/cmdline and shell history.
+	// chpasswd reads "username:password" from stdin, which is not logged.
+	if spec.Password != "" {
+		if err := setPasswordViaPipe(ctx, spec.Target, spec.Password); err != nil {
+			// Best-effort cleanup: delete the user we just created
+			_, _, _ = runPrivilegedCommand(ctx, "userdel", "-r", spec.Target)
+			return commandFailure("access.add-user", "password setup failed — user rolled back", err.Error(), 1, err)
+		}
+	}
+
+	// ── Append SSH public key if provided ────────────────────────────────────
+	if spec.SSHKey != "" {
+		if appendErr := appendAuthorizedKey(e, spec.Target, spec.SSHKey); appendErr != nil {
+			// Non-fatal: user exists, password set — just report the warning
+			return marshalResult(agent.TypedControlResult{
+				Operation: "access.add-user",
+				Summary:   "user created (password set) but SSH key append failed: " + appendErr.Error(),
+				Data: map[string]any{
+					"target":   spec.Target,
+					"home":     spec.Home,
+					"shell":    spec.Shell,
+					"groups":   spec.Groups,
+					"ssh_key":  false,
+				},
+			})
+		}
+	}
+
 	return marshalResult(agent.TypedControlResult{
 		Operation: "access.add-user",
 		Summary:   "user created",
 		Data: map[string]any{
-			"target": spec.Target,
-			"home":   spec.Home,
-			"shell":  spec.Shell,
-			"groups": spec.Groups,
+			"target":  spec.Target,
+			"home":    spec.Home,
+			"shell":   spec.Shell,
+			"groups":  spec.Groups,
+			"ssh_key": spec.SSHKey != "",
 		},
 	})
 }
@@ -693,7 +913,12 @@ func (e *ControlExecutor) addGroup(ctx context.Context, params map[string]any) (
 	if err := validateGroupTarget(spec.Target); err != nil {
 		return "", 1, err
 	}
-	if output, exitCode, err := runPrivilegedCommand(ctx, "groupadd", spec.Target); err != nil {
+	groupArgs := []string{"groupadd"}
+	if spec.GID != nil {
+		groupArgs = append(groupArgs, "-g", strconv.Itoa(*spec.GID))
+	}
+	groupArgs = append(groupArgs, spec.Target)
+	if output, exitCode, err := runPrivilegedCommand(ctx, groupArgs...); err != nil {
 		return commandFailure("access.add-group", "group creation failed", output, exitCode, err)
 	}
 	if len(spec.Members) > 0 {
@@ -1125,6 +1350,13 @@ type accessMutationSpec struct {
 	Groups     []string `json:"groups"`
 	Members    []string `json:"members"`
 	RemoveHome bool     `json:"remove_home"`
+	// User-specific advanced fields
+	Password string `json:"password"` // never logged; applied via chpasswd stdin
+	SSHKey   string `json:"ssh_key"`  // appended to authorized_keys if set
+	UID      *int   `json:"uid"`      // optional forced UID
+	System   bool   `json:"system"`   // create as system account (--system)
+	// Group-specific
+	GID *int `json:"gid"` // optional forced GID
 }
 
 func parseAccessMutation(params map[string]any) (accessMutationSpec, error) {
@@ -1142,6 +1374,8 @@ func parseAccessMutation(params map[string]any) (accessMutationSpec, error) {
 	spec.RenameTo = strings.TrimSpace(spec.RenameTo)
 	spec.Home = strings.TrimSpace(spec.Home)
 	spec.Shell = strings.TrimSpace(spec.Shell)
+	spec.Password = strings.TrimSpace(spec.Password)
+	spec.SSHKey = strings.TrimSpace(spec.SSHKey)
 	spec.Groups = normalizePrincipals(spec.Groups)
 	spec.Members = normalizePrincipals(spec.Members)
 	return spec, nil

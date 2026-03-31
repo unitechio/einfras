@@ -44,6 +44,8 @@ export function K8sPodExecTerminal({ clusterId, namespace, podName, containerNam
                 cursor: "#38bdf8",
             },
         });
+        const inputEncoder = new TextEncoder();
+        const outputDecoder = new TextDecoder();
         term.attachCustomKeyEventHandler((event) => {
             const lowerKey = event.key.toLowerCase();
             const isMeta = event.ctrlKey || event.metaKey;
@@ -51,14 +53,7 @@ export function K8sPodExecTerminal({ clusterId, namespace, podName, containerNam
                 void navigator.clipboard?.writeText(term.getSelection());
                 return false;
             }
-            if (isMeta && lowerKey === "v") {
-                void navigator.clipboard?.readText().then((text) => {
-                    if (text && socketRef.current?.readyState === WebSocket.OPEN) {
-                        socketRef.current.send(JSON.stringify({ type: "input", data: text }));
-                    }
-                }).catch(() => undefined);
-                return false;
-            }
+            // Let xterm/browser handle paste so onData emits the payload once.
             return true;
         });
         const fitAddon = new FitAddon();
@@ -84,7 +79,7 @@ export function K8sPodExecTerminal({ clusterId, namespace, podName, containerNam
         const sendResize = () => {
             const dimensions = fitAddon.proposeDimensions();
             if (socket.readyState === WebSocket.OPEN && dimensions) {
-                socket.send(JSON.stringify({ type: "resize", data: JSON.stringify({ cols: dimensions.cols, rows: dimensions.rows }) }));
+                socket.send(JSON.stringify({ type: "resize", cols: dimensions.cols, rows: dimensions.rows }));
             }
         };
 
@@ -95,9 +90,11 @@ export function K8sPodExecTerminal({ clusterId, namespace, podName, containerNam
         };
         socket.onmessage = (event) => {
             if (typeof event.data !== "string") {
-                void new Response(event.data).text().then((text) => {
+                const chunk = event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : event.data;
+                const text = outputDecoder.decode(chunk, { stream: true });
+                if (text) {
                     terminalRef.current?.write(text);
-                });
+                }
                 return;
             }
             try {
@@ -135,7 +132,7 @@ export function K8sPodExecTerminal({ clusterId, namespace, podName, containerNam
             if (socket.readyState !== WebSocket.OPEN) {
                 return;
             }
-            socket.send(JSON.stringify({ type: "input", data }));
+            socket.send(inputEncoder.encode(data));
         });
 
         const handleResize = () => {

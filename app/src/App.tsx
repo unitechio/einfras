@@ -132,6 +132,7 @@ function PageHeader({ onLogout }: { onLogout: () => void }) {
       "/images": "Image Library",
       "/stacks": "Stack Deployments",
       "/volumes": "Storage Volumes",
+      "/disk-usage": "Docker Disk Usage",
       "/notifications": "Recent Alerts",
       "/tags": "Label Management",
       "/applications": "Application Catalog",

@@ -16,3 +16,4 @@ export { default as VolumeDetailPage } from './pages/VolumeDetailPage';
 export { default as ServiceDetailPage } from './pages/ServiceDetailPage';
 export { default as DeployContainerPage } from './pages/DeployContainerPage';
 export { default as BuildArtifactsPage } from './pages/BuildArtifactsPage';
+export { default as DiskUsagePage } from './pages/DiskUsagePage';

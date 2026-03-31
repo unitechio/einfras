@@ -181,6 +181,9 @@ const NetworkDetailPage = lazy(() =>
 const VolumesPage = lazy(() =>
   import("@/features/docker").then((m) => ({ default: m.VolumesPage })),
 );
+const DiskUsagePage = lazy(() =>
+  import("@/features/docker").then((m) => ({ default: m.DiskUsagePage })),
+);
 const VolumeDetailPage = lazy(() =>
   import("@/features/docker").then((m) => ({ default: m.VolumeDetailPage })),
 );
@@ -234,6 +237,9 @@ const IngressesPage = lazy(() =>
 );
 const ConfigMapsPage = lazy(() =>
   import("@/features/kubernetes").then((m) => ({ default: m.ConfigMapsPage })),
+);
+const ConfigMapDetailPage = lazy(() =>
+  import("@/features/kubernetes").then((m) => ({ default: m.ConfigMapDetailPage })),
 );
 const SecretsPage = lazy(() =>
   import("@/features/kubernetes").then((m) => ({ default: m.SecretsPage })),
@@ -436,6 +442,7 @@ export const routes: RouteObject[] = [
   { path: "/gatewayclasses", element: React.createElement(GatewayClassesPage) },
   { path: "/httproutes", element: React.createElement(HTTPRoutesPage) },
   { path: "/configmaps", element: React.createElement(ConfigMapsPage) },
+  { path: "/configmaps/:namespace/:name", element: React.createElement(ConfigMapDetailPage) },
   { path: "/secrets", element: React.createElement(SecretsPage) },
   { path: "/serviceaccounts", element: React.createElement(ServiceAccountsPage) },
   { path: "/roles-k8s", element: React.createElement(RolesK8sPage) },
@@ -478,6 +485,7 @@ export const routes: RouteObject[] = [
   { path: "/topology", element: React.createElement(TopologyPage) },
   { path: "/auto-heal", element: React.createElement(AutoHealPage) },
   { path: "/volumes", element: React.createElement(VolumesPage) },
+  { path: "/disk-usage", element: React.createElement(DiskUsagePage) },
   { path: "/volumes/:volumeName", element: React.createElement(VolumeDetailPage) },
   { path: "/users", element: React.createElement(UsersPage) },
   { path: "/roles", element: React.createElement(RolesPage) },

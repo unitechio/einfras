@@ -127,7 +127,8 @@ func NewRuntime() (*Runtime, error) {
 	resourcesHandler := serverhttp.NewResourcesHandler(serviceManager, installPlanManager, networkManager, firewallManager, backupManager, cronManager, storageManager, observabilityManager, controlManager)
 	onboardingHandler := serverhttp.NewOnboardingHandler(tokenService, artifactDistributor, cfg.AgentArtifacts)
 	commandHandler := agenthandler.NewCommandHandler(dispatcher, commandRepo)
-	agentWSHandler := agenthandler.NewAgentWSHandler(hub, dispatcher, agentStatusRepo, tokenService, observabilityManager)
+	agentWSHandler := agenthandler.NewAgentWSHandler(hub, dispatcher, agentStatusRepo, tokenService, observabilityManager).
+		WithServerRepository(serverRepository)
 	clientWSHandler := agenthandler.NewClientWSHandler(hub)
 	agentStatusHandler := agenthandler.NewAgentStatusHandler(hub, agentInfoRepo)
 	tokenHandler := agenthandler.NewAgentTokenHandler(tokenService)

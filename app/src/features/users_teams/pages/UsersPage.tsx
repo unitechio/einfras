@@ -75,7 +75,9 @@ export default function UsersPage() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<UserFormState>(emptyForm);
-  const [deleteCandidate, setDeleteCandidate] = useState<UserRecord | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<UserRecord | null>(
+    null,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -156,7 +158,10 @@ export default function UsersPage() {
     });
   }
 
-  function updateField<K extends keyof UserFormState>(key: K, value: UserFormState[K]) {
+  function updateField<K extends keyof UserFormState>(
+    key: K,
+    value: UserFormState[K],
+  ) {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
@@ -174,7 +179,11 @@ export default function UsersPage() {
     if (sortBy !== column) {
       return <ArrowUpDown className="h-3.5 w-3.5" />;
     }
-    return sortDir === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />;
+    return sortDir === "asc" ? (
+      <ArrowUp className="h-3.5 w-3.5" />
+    ) : (
+      <ArrowDown className="h-3.5 w-3.5" />
+    );
   }
 
   function toggleRole(slug: string) {
@@ -243,8 +252,13 @@ export default function UsersPage() {
           description: `${created.username} is ready for sign-in.`,
         });
       } else if (selectedUser) {
-        const updated = await usersTeamsApi.updateUser(selectedUser.id, payload);
-        const nextUsers = users.map((item) => (item.id === updated.id ? updated : item));
+        const updated = await usersTeamsApi.updateUser(
+          selectedUser.id,
+          payload,
+        );
+        const nextUsers = users.map((item) =>
+          item.id === updated.id ? updated : item,
+        );
         setUsers(nextUsers);
         setSelectedUserId(updated.id);
         setForm((current) => ({ ...current, password: "" }));
@@ -293,385 +307,453 @@ export default function UsersPage() {
 
   return (
     <>
-    <div className="space-y-6 animate-in fade-in duration-500 pb-20">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-            <UsersIcon className="h-6 w-6 text-indigo-500" />
-            Users
-          </h1>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Manage identities, role grants, team membership and account lifecycle.
-          </p>
-        </div>
-        <Button variant="primary" onClick={startCreate}>
-          <Plus className="mr-2 h-4 w-4" />
-          Create User
-        </Button>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <section className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-            <Input
-              icon={<Search className="h-4 w-4 text-zinc-400" />}
-              placeholder="Search by username, mail, role, team"
-              value={searchInput}
-              onChange={(event) => {
-                setPage(1);
-                setSearchInput(event.target.value);
-              }}
-            />
-            <select
-              value={statusFilter}
-              onChange={(event) => {
-                setPage(1);
-                setStatusFilter(event.target.value);
-              }}
-              className="h-9 rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-zinc-800 dark:bg-[#121212] dark:text-zinc-100"
-            >
-              <option value="">All statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
-            <div className="rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-[#121212] dark:text-zinc-300">
-              {totalUsers} users
-            </div>
-            <div className="rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-[#121212] dark:text-zinc-300">
-              {users.filter((item) => item.is_active).length} active
-            </div>
+      <div className="space-y-6 animate-in fade-in duration-500 pb-20">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+              <UsersIcon className="h-6 w-6 text-indigo-500" />
+              Users
+            </h1>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              Manage identities, role grants, team membership and account
+              lifecycle.
+            </p>
           </div>
+          <Button variant="primary" onClick={startCreate}>
+            <Plus className="mr-2 h-4 w-4" />
+            Create User
+          </Button>
+        </div>
 
-          <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>
-                    <button type="button" onClick={() => handleSort("name")} className="inline-flex items-center gap-1 text-left">
-                      User
-                      {renderSortIcon("name")}
-                    </button>
-                  </TableHead>
-                  <TableHead>Roles</TableHead>
-                  <TableHead>Teams</TableHead>
-                  <TableHead>
-                    <button type="button" onClick={() => handleSort("status")} className="inline-flex items-center gap-1 text-left">
-                      Status
-                      {renderSortIcon("status")}
-                    </button>
-                  </TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
+        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+          <section className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+              <Input
+                icon={<Search className="h-4 w-4 text-zinc-400" />}
+                placeholder="Search by username, mail, role, team"
+                value={searchInput}
+                onChange={(event) => {
+                  setPage(1);
+                  setSearchInput(event.target.value);
+                }}
+              />
+              <select
+                value={statusFilter}
+                onChange={(event) => {
+                  setPage(1);
+                  setStatusFilter(event.target.value);
+                }}
+                className="h-9 rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-zinc-800 dark:bg-[#121212] dark:text-zinc-100"
+              >
+                <option value="">All statuses</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+              <div className="rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-[#121212] dark:text-zinc-300">
+                {totalUsers} users
+              </div>
+              <div className="rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-[#121212] dark:text-zinc-300">
+                {users.filter((item) => item.is_active).length} active
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-md border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={5} className="h-40 text-center text-zinc-500">
-                      Loading users...
-                    </TableCell>
+                    <TableHead>
+                      <button
+                        type="button"
+                        onClick={() => handleSort("name")}
+                        className="inline-flex items-center gap-1 text-left"
+                      >
+                        User
+                        {renderSortIcon("name")}
+                      </button>
+                    </TableHead>
+                    <TableHead>Roles</TableHead>
+                    <TableHead>Teams</TableHead>
+                    <TableHead>
+                      <button
+                        type="button"
+                        onClick={() => handleSort("status")}
+                        className="inline-flex items-center gap-1 text-left"
+                      >
+                        Status
+                        {renderSortIcon("status")}
+                      </button>
+                    </TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
-                ) : users.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="h-40 text-center text-zinc-500">
-                      No users matched this search.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  users.map((user) => (
-                    <TableRow
-                      key={user.id}
-                      className={cn(
-                        "cursor-pointer transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/40",
-                        selectedUserId === user.id && "bg-indigo-50 dark:bg-zinc-900/70",
-                      )}
-                      onClick={() => selectUser(user)}
-                    >
-                      <TableCell>
-                        <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                          {user.full_name || user.username}
-                        </div>
-                        <div className="text-xs text-zinc-500">{user.username}</div>
-                        <div className="text-xs text-zinc-500">{user.email}</div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1.5">
-                          {user.roles.map((role) => (
-                            <Badge
-                              key={role}
-                              variant={role === "admin" ? "error" : "outline"}
-                            >
-                              <Shield className="mr-1 inline h-3 w-3" />
-                              {role}
-                            </Badge>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1.5">
-                          {user.teams.length > 0 ? user.teams.map((team) => (
-                            <Badge key={team} variant="outline">
-                              {team}
-                            </Badge>
-                          )) : <span className="text-xs text-zinc-500">No teams</span>}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
-                            user.is_active
-                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
-                              : "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
-                          )}
-                        >
-                          {user.is_active ? (
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                          ) : (
-                            <XCircle className="h-3.5 w-3.5" />
-                          )}
-                          {user.is_active ? "Active" : "Disabled"}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setDeleteCandidate(user);
-                          }}
-                        >
-                          <Trash2 size={14} />
-                        </Button>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={5}
+                        className="h-40 text-center text-zinc-500"
+                      >
+                        Loading users...
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </section>
-
-        <section className="overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
-          <div className="border-b border-zinc-200 bg-zinc-50/70 px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900/30">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300">
-                <UserCog className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">
-                  {isCreating ? "Create user" : selectedUser ? `Edit ${selectedUser.username}` : "Select a user"}
-                </h2>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Provision credentials, assign roles and control tenant team access.
-                </p>
-              </div>
+                  ) : users.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={5}
+                        className="h-40 text-center text-zinc-500"
+                      >
+                        No users matched this search.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    users.map((user) => (
+                      <TableRow
+                        key={user.id}
+                        className={cn(
+                          "cursor-pointer transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/40",
+                          selectedUserId === user.id &&
+                            "bg-indigo-50 dark:bg-zinc-900/70",
+                        )}
+                        onClick={() => selectUser(user)}
+                      >
+                        <TableCell>
+                          <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                            {user.full_name || user.username}
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            {user.username}
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            {user.email}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1.5">
+                            {user.roles.map((role) => (
+                              <Badge
+                                key={role}
+                                variant={role === "admin" ? "error" : "outline"}
+                              >
+                                <Shield className="mr-1 inline h-3 w-3" />
+                                {role}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1.5">
+                            {user.teams.length > 0 ? (
+                              user.teams.map((team) => (
+                                <Badge key={team} variant="outline">
+                                  {team}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-xs text-zinc-500">
+                                No teams
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
+                              user.is_active
+                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                                : "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
+                            )}
+                          >
+                            {user.is_active ? (
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                            ) : (
+                              <XCircle className="h-3.5 w-3.5" />
+                            )}
+                            {user.is_active ? "Active" : "Disabled"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setDeleteCandidate(user);
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
-          </div>
+          </section>
 
-          <div className="space-y-5 p-6">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                  Username
-                </label>
-                <Input
-                  value={form.username}
-                  onChange={(event) => updateField("username", event.target.value)}
-                  placeholder="platform.ops"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                  Full name
-                </label>
-                <Input
-                  value={form.full_name}
-                  onChange={(event) => updateField("full_name", event.target.value)}
-                  placeholder="Platform Operations"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                Email
-              </label>
-              <Input
-                type="email"
-                value={form.email}
-                onChange={(event) => updateField("email", event.target.value)}
-                placeholder="user@company.com"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                {isCreating ? "Temporary password" : "Reset password"}
-              </label>
-              <Input
-                type="password"
-                value={form.password}
-                onChange={(event) => updateField("password", event.target.value)}
-                placeholder={isCreating ? "Minimum 8 characters" : "Leave empty to keep current password"}
-              />
-              <p className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
-                <KeyRound className="h-3.5 w-3.5" />
-                {isCreating
-                  ? "This password is used for first login."
-                  : "Entering a new password here will overwrite the current one."}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-              <div className="mb-3 flex items-center justify-between">
+          <section className="overflow-hidden rounded-md border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
+            <div className="border-b border-zinc-200 bg-zinc-50/70 px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900/30">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300">
+                  <UserCog className="h-5 w-5" />
+                </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                    Roles
-                  </h3>
+                  <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+                    {isCreating
+                      ? "Create user"
+                      : selectedUser
+                        ? `Edit ${selectedUser.username}`
+                        : "Select a user"}
+                  </h2>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Users can hold multiple roles inside the active organization.
+                    Provision credentials, assign roles and control tenant team
+                    access.
                   </p>
                 </div>
               </div>
-              <div className="grid gap-2 md:grid-cols-2">
-                {roles.map((role) => (
-                  <label
-                    key={role.id}
-                    className={cn(
-                      "flex cursor-pointer items-start gap-3 rounded-2xl border px-3 py-3 transition-colors",
-                      form.roles.includes(role.slug)
-                        ? "border-indigo-400 bg-indigo-50/80 dark:border-indigo-500/40 dark:bg-indigo-500/10"
-                        : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700",
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.roles.includes(role.slug)}
-                      onChange={() => toggleRole(role.slug)}
-                      className="mt-1 h-4 w-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                          {role.name}
-                        </span>
-                        {role.is_system ? <Badge variant="outline">System</Badge> : null}
-                      </div>
-                      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                        {role.description || "Custom access role"}
-                      </p>
-                    </div>
-                  </label>
-                ))}
-              </div>
             </div>
 
-            <div className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                Teams
-              </h3>
-              <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
-                Team membership is used later by ABAC owner/team checks.
-              </p>
-              <div className="grid gap-2 md:grid-cols-2">
-                {teams.map((team) => (
-                  <label
-                    key={team.id}
-                    className={cn(
-                      "flex cursor-pointer items-center gap-3 rounded-2xl border px-3 py-3 transition-colors",
-                      form.team_ids.includes(team.id)
-                        ? "border-cyan-400 bg-cyan-50/70 dark:border-cyan-500/40 dark:bg-cyan-500/10"
-                        : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700",
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.team_ids.includes(team.id)}
-                      onChange={() => toggleTeam(team.id)}
-                      className="h-4 w-4 rounded border-zinc-300 text-cyan-600 focus:ring-cyan-500"
-                    />
-                    <div>
-                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        {team.name}
-                      </div>
-                      <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                        {team.member_count} members
-                      </div>
-                    </div>
+            <div className="space-y-5 p-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                    Username
                   </label>
-                ))}
-                {teams.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-zinc-300 px-3 py-4 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-                    No teams created yet.
+                  <Input
+                    value={form.username}
+                    onChange={(event) =>
+                      updateField("username", event.target.value)
+                    }
+                    placeholder="platform.ops"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                    Full name
+                  </label>
+                  <Input
+                    value={form.full_name}
+                    onChange={(event) =>
+                      updateField("full_name", event.target.value)
+                    }
+                    placeholder="Platform Operations"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                  Email
+                </label>
+                <Input
+                  type="email"
+                  value={form.email}
+                  onChange={(event) => updateField("email", event.target.value)}
+                  placeholder="user@company.com"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                  {isCreating ? "Temporary password" : "Reset password"}
+                </label>
+                <Input
+                  type="password"
+                  value={form.password}
+                  onChange={(event) =>
+                    updateField("password", event.target.value)
+                  }
+                  placeholder={
+                    isCreating
+                      ? "Minimum 8 characters"
+                      : "Leave empty to keep current password"
+                  }
+                />
+                <p className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  <KeyRound className="h-3.5 w-3.5" />
+                  {isCreating
+                    ? "This password is used for first login."
+                    : "Entering a new password here will overwrite the current one."}
+                </p>
+              </div>
+
+              <div className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      Roles
+                    </h3>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      Users can hold multiple roles inside the active
+                      organization.
+                    </p>
                   </div>
-                ) : null}
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {roles.map((role) => (
+                    <label
+                      key={role.id}
+                      className={cn(
+                        "flex cursor-pointer items-start gap-3 rounded-md border px-3 py-3 transition-colors",
+                        form.roles.includes(role.slug)
+                          ? "border-indigo-400 bg-indigo-50/80 dark:border-indigo-500/40 dark:bg-indigo-500/10"
+                          : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700",
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.roles.includes(role.slug)}
+                        onChange={() => toggleRole(role.slug)}
+                        className="mt-1 h-4 w-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                            {role.name}
+                          </span>
+                          {role.is_system ? (
+                            <Badge variant="outline">System</Badge>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                          {role.description || "Custom access role"}
+                        </p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
               </div>
+
+              <div className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  Teams
+                </h3>
+                <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+                  Team membership is used later by ABAC owner/team checks.
+                </p>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {teams.map((team) => (
+                    <label
+                      key={team.id}
+                      className={cn(
+                        "flex cursor-pointer items-center gap-3 rounded-md border px-3 py-3 transition-colors",
+                        form.team_ids.includes(team.id)
+                          ? "border-cyan-400 bg-cyan-50/70 dark:border-cyan-500/40 dark:bg-cyan-500/10"
+                          : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700",
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.team_ids.includes(team.id)}
+                        onChange={() => toggleTeam(team.id)}
+                        className="h-4 w-4 rounded border-zinc-300 text-cyan-600 focus:ring-cyan-500"
+                      />
+                      <div>
+                        <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                          {team.name}
+                        </div>
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {team.member_count} members
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                  {teams.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-zinc-300 px-3 py-4 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                      No teams created yet.
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <label className="flex items-center gap-3 rounded-md border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+                <input
+                  type="checkbox"
+                  checked={form.is_active}
+                  onChange={(event) =>
+                    updateField("is_active", event.target.checked)
+                  }
+                  className="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <div>
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    Account active
+                  </div>
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Disabled users cannot sign in or refresh sessions.
+                  </div>
+                </div>
+              </label>
             </div>
 
-            <label className="flex items-center gap-3 rounded-2xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
-              <input
-                type="checkbox"
-                checked={form.is_active}
-                onChange={(event) => updateField("is_active", event.target.checked)}
-                className="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
-              />
-              <div>
-                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                  Account active
-                </div>
-                <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Disabled users cannot sign in or refresh sessions.
-                </div>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-200 bg-zinc-50/70 px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900/30">
+              <div className="mr-auto flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  Previous
+                </Button>
+                <span>
+                  Page {page} / {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() =>
+                    setPage((current) => Math.min(totalPages, current + 1))
+                  }
+                >
+                  Next
+                </Button>
               </div>
-            </label>
-          </div>
-
-          <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-200 bg-zinc-50/70 px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900/30">
-            <div className="mr-auto flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
-              <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>
-                Previous
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (selectedUser) {
+                    selectUser(selectedUser);
+                    return;
+                  }
+                  startCreate();
+                }}
+              >
+                Reset form
               </Button>
-              <span>
-                Page {page} / {totalPages}
-              </span>
-              <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
-                Next
+              <Button
+                variant="primary"
+                onClick={() => void handleSubmit()}
+                isLoading={isSaving}
+              >
+                {isCreating ? "Create User" : "Save Changes"}
               </Button>
             </div>
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (selectedUser) {
-                  selectUser(selectedUser);
-                  return;
-                }
-                startCreate();
-              }}
-            >
-              Reset form
-            </Button>
-            <Button variant="primary" onClick={() => void handleSubmit()} isLoading={isSaving}>
-              {isCreating ? "Create User" : "Save Changes"}
-            </Button>
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
-    </div>
-    <ConfirmActionDialog
-      open={!!deleteCandidate}
-      title="Remove user?"
-      description={deleteCandidate ? `This removes ${deleteCandidate.username} from the workspace and revokes their access.` : ""}
-      confirmLabel="Remove User"
-      onClose={() => setDeleteCandidate(null)}
-      onConfirm={() => {
-        if (!deleteCandidate) return;
-        void handleDeleteUser(deleteCandidate).finally(() => setDeleteCandidate(null));
-      }}
-      pending={false}
-      tone="danger"
-    />
+      <ConfirmActionDialog
+        open={!!deleteCandidate}
+        title="Remove user?"
+        description={
+          deleteCandidate
+            ? `This removes ${deleteCandidate.username} from the workspace and revokes their access.`
+            : ""
+        }
+        confirmLabel="Remove User"
+        onClose={() => setDeleteCandidate(null)}
+        onConfirm={() => {
+          if (!deleteCandidate) return;
+          void handleDeleteUser(deleteCandidate).finally(() =>
+            setDeleteCandidate(null),
+          );
+        }}
+        pending={false}
+        tone="danger"
+      />
     </>
   );
 }

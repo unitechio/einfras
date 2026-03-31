@@ -11,6 +11,7 @@ import ReactFlow, {
   Background,
   Controls,
   MiniMap,
+  Position,
   type Edge,
   type Node,
 } from "reactflow";
@@ -85,7 +86,8 @@ const kindIcon: Record<string, typeof Container> = {
 function formatNodeText(value: unknown): string {
   if (value == null) return "-";
   if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
   if (Array.isArray(value)) {
     return value.map((item) => formatNodeText(item)).join(", ");
   }
@@ -147,25 +149,94 @@ export default function TopologyPage() {
 
   const laneCounts = useMemo(() => {
     return laneOrder.reduce<Record<string, number>>((accumulator, kind) => {
-      accumulator[kind] = topologyNodes.filter((node) => node.kind === kind).length;
+      accumulator[kind] = topologyNodes.filter(
+        (node) => node.kind === kind,
+      ).length;
       return accumulator;
     }, {});
   }, [topologyNodes]);
 
   const graph = useMemo(() => {
-    const rows: Record<string, number> = { network: 0, container: 0, volume: 0, bind: 0 };
+    // 1. Group nodes by lane
+    const nodesByLane: Record<string, typeof topologyNodes> = {
+      network: [],
+      container: [],
+      volume: [],
+      bind: [],
+    };
+    topologyNodes.forEach((node) => {
+      const kind = node.kind in nodesByLane ? node.kind : "container";
+      nodesByLane[kind].push(node);
+    });
 
-    const nodes: Node[] = topologyNodes.map((node) => {
-      const rowIndex = rows[node.kind] ?? 0;
-      rows[node.kind] = rowIndex + 1;
-      const lane = laneMeta[node.kind] ?? laneMeta.container;
+    // 2. Map connections
+    const links = new Map<string, string[]>();
+    topologyEdges.forEach((edge) => {
+      if (!links.has(edge.source)) links.set(edge.source, []);
+      if (!links.has(edge.target)) links.set(edge.target, []);
+      links.get(edge.source)!.push(edge.target);
+      links.get(edge.target)!.push(edge.source);
+    });
+
+    // 3. Sort containers alphabetically first (as central anchor)
+    nodesByLane.container.sort((a, b) =>
+      String(a.label ?? "").localeCompare(String(b.label ?? ""))
+    );
+
+    const containerIndexMap = new Map<string, number>();
+    nodesByLane.container.forEach((node, idx) => {
+      containerIndexMap.set(node.id, idx);
+    });
+
+    // 4. Helper to find average Y-index of connected containers
+    const getAvgContainerIndex = (nodeId: string) => {
+      const connected = links.get(nodeId) || [];
+      const indices = connected
+        .map((id) => containerIndexMap.get(id))
+        .filter((idx): idx is number => idx !== undefined);
+
+      if (indices.length === 0) return 0;
+      return indices.reduce((a, b) => a + b, 0) / indices.length;
+    };
+
+    // 5. Sort other lanes based on their connection to containers
+    ["network", "volume", "bind"].forEach((kind) => {
+      nodesByLane[kind].sort((a, b) => {
+        const avgA = getAvgContainerIndex(a.id);
+        const avgB = getAvgContainerIndex(b.id);
+        if (avgA !== avgB) return avgA - avgB;
+        return String(a.label ?? "").localeCompare(String(b.label ?? ""));
+      });
+    });
+
+    const rows: Record<string, number> = {
+      network: 0,
+      container: 0,
+      volume: 0,
+      bind: 0,
+    };
+
+    const sortedTopologyNodes = [
+      ...nodesByLane.network,
+      ...nodesByLane.container,
+      ...nodesByLane.volume,
+      ...nodesByLane.bind,
+    ];
+
+    const nodes: Node[] = sortedTopologyNodes.map((node) => {
+      const kind = node.kind in rows ? node.kind : "container";
+      const rowIndex = rows[kind] ?? 0;
+      rows[kind] = rowIndex + 1;
+      const lane = laneMeta[kind] ?? laneMeta.container;
       const y = 96 + rowIndex * 152;
       const isSelected = selectedNodeId === node.id;
-      const Icon = kindIcon[node.kind] ?? Boxes;
+      const Icon = kindIcon[kind] ?? Boxes;
 
       return {
         id: node.id,
         position: { x: lane.x, y },
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
         data: {
           label: (
             <div className="space-y-3">
@@ -173,16 +244,19 @@ export default function TopologyPage() {
                 <div
                   className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
                   style={{
-                    backgroundColor: `${kindColor[node.kind] ?? "#71717a"}18`,
+                    backgroundColor: `${kindColor[kind] ?? "#71717a"}18`,
                   }}
                 >
                   <Icon
                     className="h-4.5 w-4.5"
-                    style={{ color: kindColor[node.kind] ?? "#71717a" }}
+                    style={{ color: kindColor[kind] ?? "#71717a" }}
                   />
                 </div>
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-zinc-900" title={formatNodeText(node.label)}>
+                  <div
+                    className="truncate text-sm font-semibold text-zinc-900"
+                    title={formatNodeText(node.label)}
+                  >
                     {formatNodeText(node.label)}
                   </div>
                   <div className="mt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
@@ -191,14 +265,18 @@ export default function TopologyPage() {
                 </div>
               </div>
               <div className="space-y-1.5 text-xs text-zinc-500">
-                {node.status ? <div className="truncate">{node.status}</div> : null}
+                {node.status ? (
+                  <div className="truncate">{node.status}</div>
+                ) : null}
                 {node.metadata
                   ? Object.entries(node.metadata)
                       .slice(0, 2)
                       .map(([key, value]) => (
                         <div key={key} className="truncate">
-                          <span className="font-medium text-zinc-700">{key}</span>:{" "}
-                          {formatNodeText(value)}
+                          <span className="font-medium text-zinc-700">
+                            {key}
+                          </span>
+                          : {formatNodeText(value)}
                         </div>
                       ))
                   : null}
@@ -210,8 +288,8 @@ export default function TopologyPage() {
           background: "#ffffff",
           color: "#111827",
           border: isSelected
-            ? `2px solid ${kindColor[node.kind] ?? "#71717a"}`
-            : `1px solid ${kindColor[node.kind] ?? "#71717a"}35`,
+            ? `2px solid ${kindColor[kind] ?? "#71717a"}`
+            : `1px solid ${kindColor[kind] ?? "#71717a"}35`,
           borderRadius: 20,
           minWidth: 250,
           maxWidth: 250,
@@ -224,44 +302,58 @@ export default function TopologyPage() {
       };
     });
 
-    const edges: Edge[] = topologyEdges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      label: formatNodeText(edge.label),
-      animated: edge.label === "attached" || edge.label === "uses",
-      style: {
-        stroke:
-          edge.label === "mounted"
-            ? "#a855f7"
-            : edge.label === "connected"
-              ? "#0891b2"
-              : "#94a3b8",
-        strokeWidth: 1.6,
-      },
-      labelStyle: {
-        fill: "#64748b",
-        fontSize: 11,
-        fontWeight: 600,
-      },
-      type: "smoothstep",
-    }));
+    const edges: Edge[] = topologyEdges.map((edge) => {
+      const sourceNode = topologyNodes.find((n) => n.id === edge.source);
+      const targetNode = topologyNodes.find((n) => n.id === edge.target);
+
+      const sourceLane = sourceNode ? laneMeta[sourceNode.kind] ?? laneMeta.container : laneMeta.container;
+      const targetLane = targetNode ? laneMeta[targetNode.kind] ?? laneMeta.container : laneMeta.container;
+
+      // Swap direction if the edge wants to jump backwards (right-to-left physically)
+      const shouldReverse = sourceLane.x > targetLane.x;
+
+      return {
+        id: edge.id,
+        source: shouldReverse ? edge.target : edge.source,
+        target: shouldReverse ? edge.source : edge.target,
+        label: formatNodeText(edge.label),
+        animated: edge.label === "attached" || edge.label === "uses",
+        style: {
+          stroke:
+            edge.label === "mounted"
+              ? "#a855f7"
+              : edge.label === "connected"
+                ? "#0891b2"
+                : "#94a3b8",
+          strokeWidth: 1.6,
+        },
+        labelStyle: {
+          fill: "#64748b",
+          fontSize: 11,
+          fontWeight: 600,
+        },
+        type: "smoothstep",
+      };
+    });
 
     return { nodes, edges };
   }, [selectedNodeId, topologyEdges, topologyNodes]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20">
-      {!featureFlags.isLoading && !featureFlags.isEnabled("runtime_topology", true) ? (
+      {!featureFlags.isLoading &&
+      !featureFlags.isEnabled("runtime_topology", true) ? (
         <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-sm text-zinc-500">
-          Runtime Topology is disabled by feature flag. Turn on `runtime_topology`
-          from Settings to inspect container, network, and volume relationships here.
+          Runtime Topology is disabled by feature flag. Turn on
+          `runtime_topology` from Settings to inspect container, network, and
+          volume relationships here.
         </div>
       ) : null}
 
-      {!featureFlags.isLoading && !featureFlags.isEnabled("runtime_topology", true) ? null : (
+      {!featureFlags.isLoading &&
+      !featureFlags.isEnabled("runtime_topology", true) ? null : (
         <>
-          <div className="rounded-3xl border border-zinc-200 bg-white/95 p-6 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
+          <div className="rounded-md border border-zinc-200 bg-white/95 p-6 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
             <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
               <div className="max-w-3xl">
                 <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
@@ -269,18 +361,19 @@ export default function TopologyPage() {
                   Runtime Topology
                 </h1>
                 <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-                  A cleaner runtime map for Docker environments, with each resource
-                  family separated into its own lane so dependencies are easier to read.
+                  A cleaner runtime map for Docker environments, with each
+                  resource family separated into its own lane so dependencies
+                  are easier to read.
                 </p>
               </div>
 
-              <div className="relative xl:min-w-[280px]">
+              <div className="relative xl:min-w-70">
                 <Server className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
                 <select
                   value={selectedServerId}
                   onChange={(event) => setSelectedServerId(event.target.value)}
                   disabled={isLoadingServers}
-                  className="h-11 w-full cursor-pointer appearance-none rounded-xl border border-zinc-200 bg-white pl-9 pr-8 text-[13px] font-medium text-zinc-900 shadow-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 dark:border-zinc-800 dark:bg-[#121212] dark:text-zinc-100"
+                  className="h-11 w-full cursor-pointer appearance-none rounded-md border border-zinc-200 bg-white pl-9 pr-8 text-[13px] font-medium text-zinc-900 shadow-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 dark:border-zinc-800 dark:bg-[#121212] dark:text-zinc-100"
                 >
                   <option value="" disabled>
                     Select Docker environment...
@@ -295,15 +388,23 @@ export default function TopologyPage() {
             </div>
 
             <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {metricCard("Networks", laneCounts.network ?? 0, kindColor.network)}
-              {metricCard("Containers", laneCounts.container ?? 0, kindColor.container)}
+              {metricCard(
+                "Networks",
+                laneCounts.network ?? 0,
+                kindColor.network,
+              )}
+              {metricCard(
+                "Containers",
+                laneCounts.container ?? 0,
+                kindColor.container,
+              )}
               {metricCard("Volumes", laneCounts.volume ?? 0, kindColor.volume)}
               {metricCard("Bind mounts", laneCounts.bind ?? 0, kindColor.bind)}
             </div>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="rounded-3xl border border-zinc-200 bg-white/95 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
+            <div className="rounded-md border border-zinc-200 bg-white/95 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
               <div className="grid gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 md:grid-cols-2 xl:grid-cols-4">
                 {laneOrder.map((kind) => {
                   const lane = laneMeta[kind];
@@ -324,7 +425,10 @@ export default function TopologyPage() {
                             backgroundColor: `${kindColor[kind]}18`,
                           }}
                         >
-                          <Icon className="h-4 w-4" style={{ color: kindColor[kind] }} />
+                          <Icon
+                            className="h-4 w-4"
+                            style={{ color: kindColor[kind] }}
+                          />
                         </div>
                         <div>
                           <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -354,7 +458,10 @@ export default function TopologyPage() {
                     zoomable
                     nodeColor={(node) =>
                       kindColor[
-                        String(topologyNodes.find((item) => item.id === node.id)?.kind ?? "container")
+                        String(
+                          topologyNodes.find((item) => item.id === node.id)
+                            ?.kind ?? "container",
+                        )
                       ] ?? "#64748b"
                     }
                   />
@@ -371,7 +478,7 @@ export default function TopologyPage() {
             </div>
 
             <div className="space-y-4">
-              <div className="rounded-3xl border border-zinc-200 bg-white/95 p-5 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
+              <div className="rounded-md border border-zinc-200 bg-white/95 p-5 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-zinc-500 dark:text-zinc-400">
                   Selected resource
                 </div>
@@ -379,7 +486,9 @@ export default function TopologyPage() {
                   <div className="mt-4 space-y-4">
                     <div>
                       <div className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-                        <span className="block break-words">{formatNodeText(selectedNode.label)}</span>
+                        <span className="block break-words">
+                          {formatNodeText(selectedNode.label)}
+                        </span>
                       </div>
                       <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
                         {selectedNode.kind}
@@ -391,19 +500,21 @@ export default function TopologyPage() {
                       <div className="space-y-2 text-sm text-zinc-600 dark:text-zinc-300">
                         {selectedNode.metadata &&
                         Object.keys(selectedNode.metadata).length > 0 ? (
-                          Object.entries(selectedNode.metadata).map(([key, value]) => (
-                            <div
-                              key={key}
-                              className="flex items-start justify-between gap-3"
-                            >
-                              <span className="font-medium text-zinc-500 dark:text-zinc-400">
-                                {key}
-                              </span>
-                              <span className="max-w-[180px] break-words text-right font-mono text-xs">
-                                {formatNodeText(value)}
-                              </span>
-                            </div>
-                          ))
+                          Object.entries(selectedNode.metadata).map(
+                            ([key, value]) => (
+                              <div
+                                key={key}
+                                className="flex items-start justify-between gap-3"
+                              >
+                                <span className="font-medium text-zinc-500 dark:text-zinc-400">
+                                  {key}
+                                </span>
+                                <span className="max-w-[180px] break-words text-right font-mono text-xs">
+                                  {formatNodeText(value)}
+                                </span>
+                              </div>
+                            ),
+                          )
                         ) : (
                           <div className="text-zinc-500 dark:text-zinc-400">
                             No extra metadata available.
@@ -414,12 +525,13 @@ export default function TopologyPage() {
                   </div>
                 ) : (
                   <div className="mt-4 rounded-2xl border border-dashed border-zinc-200 p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                    Pick any node in the topology to pin its runtime details here.
+                    Pick any node in the topology to pin its runtime details
+                    here.
                   </div>
                 )}
               </div>
 
-              <div className="rounded-3xl border border-zinc-200 bg-white/95 p-5 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
+              <div className="rounded-md border border-zinc-200 bg-white/95 p-5 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-zinc-500 dark:text-zinc-400">
                   Relation count
                 </div>

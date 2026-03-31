@@ -5,6 +5,7 @@ export { default as DeploymentsPage } from './pages/DeploymentsPage';
 export { default as ServicesPage } from './pages/ServicesPage';
 export { default as IngressesPage } from './pages/IngressesPage';
 export { default as ConfigMapsPage } from './pages/ConfigMapsPage';
+export { default as ConfigMapDetailPage } from './pages/ConfigMapDetailPage';
 export { default as SecretsPage } from './pages/SecretsPage';
 export { default as NodesPage } from './pages/NodesPage';
 export { default as NamespacesPage } from './pages/NamespacesPage';

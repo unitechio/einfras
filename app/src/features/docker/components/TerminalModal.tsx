@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
-  ClipboardCopy,
+  Copy,
   ClipboardPaste,
   Maximize2,
   Minimize2,
   PlugZap,
-  RotateCcw,
   Terminal as TerminalIcon,
   X,
+  Plus,
 } from "lucide-react";
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
@@ -34,6 +34,26 @@ type ConnectionState =
   | "closed"
   | "error"
   | "fallback";
+
+interface SessionState {
+  id: string;
+  label: string;
+  term: Terminal | null;
+  fitAddon: FitAddon | null;
+  socket: WebSocket | null;
+  domRef: HTMLDivElement | null;
+  connectionStatus: ConnectionState;
+  fallbackMode: boolean;
+  fallbackRunning: boolean;
+  fallbackBuffer: string;
+  fallbackCursor: number;
+  shellCwd: string;
+  shellUser: string;
+  history: string[];
+  historyIdx: number;
+  historySavedCurrent: string;
+  tabComplete: { prefix: string; options: string[]; cursor: number } | null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -91,6 +111,11 @@ async function execShell(
   throw lastError ?? new Error("exec failed");
 }
 
+let sessionCounter = 1;
+function nextSessionId() {
+  return `s${sessionCounter++}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
@@ -103,50 +128,397 @@ export default function TerminalModal({
   environmentId,
 }: TerminalModalProps) {
   const [isMaximized, setIsMaximized] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionState>("connecting");
+  const [sessions, setSessions] = useState<SessionState[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string>("");
 
-  const terminalRef = useRef<HTMLDivElement | null>(null);
-  const xtermRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const socketRef = useRef<WebSocket | null>(null);
-
-  // Fallback shell state
-  const fallbackModeRef = useRef(false);
-  const fallbackRunningRef = useRef(false);
-  const fallbackBufferRef = useRef(""); // current line input
-  const fallbackCursorRef = useRef(0);   // cursor offset within buffer
-  const shellCwdRef = useRef("/");
-  const shellUserRef = useRef("root");
-
-  // History
-  const historyRef = useRef<string[]>([]);
-  const historyIdxRef = useRef(-1);
-  const historySavedCurrentRef = useRef("");
-
-  // Tab-complete
-  const tabCompleteRef = useRef<{
-    prefix: string;
-    options: string[];
-    cursor: number;
-  } | null>(null);
-
-  // Session guard
-  const sessionKeyRef = useRef("");
+  const sessionsRef = useRef<SessionState[]>([]);
+  const activeSessionIdRef = useRef<string>("");
 
   const { showNotification } = useNotification();
   const showNotifRef = useRef(showNotification);
   showNotifRef.current = showNotification;
 
-  // ── xterm init ─────────────────────────────────────────────────────────────
+  // Keep refs in sync with state
+  sessionsRef.current = sessions;
+  activeSessionIdRef.current = activeSessionId;
+
+  // ── Session builder ──────────────────────────────────────────────────────
+  const buildSessionState = useCallback((id: string, label: string): SessionState => ({
+    id,
+    label,
+    term: null,
+    fitAddon: null,
+    socket: null,
+    domRef: null,
+    connectionStatus: "connecting",
+    fallbackMode: false,
+    fallbackRunning: false,
+    fallbackBuffer: "",
+    fallbackCursor: 0,
+    shellCwd: "/",
+    shellUser: "root",
+    history: [],
+    historyIdx: -1,
+    historySavedCurrent: "",
+    tabComplete: null,
+  }), []);
+
+  // Update a specific session's fields
+  const updateSession = useCallback((id: string, patch: Partial<SessionState>) => {
+    setSessions(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
+  }, []);
+
+  // ── Add new session ──────────────────────────────────────────────────────
+  const addSession = useCallback(() => {
+    const id = nextSessionId();
+    const label = `Session ${sessionsRef.current.length + 1}`;
+    const newSession = buildSessionState(id, label);
+    setSessions(prev => [...prev, newSession]);
+    setActiveSessionId(id);
+  }, [buildSessionState]);
+
+  // ── Close a session ──────────────────────────────────────────────────────
+  const closeSession = useCallback((sessionId: string) => {
+    const sess = sessionsRef.current.find(s => s.id === sessionId);
+    if (sess) {
+      if (sess.socket?.readyState === WebSocket.OPEN) {
+        sess.socket.send(JSON.stringify({ type: "close", data: "" }));
+        sess.socket.close();
+      }
+      sess.term?.dispose();
+    }
+
+    setSessions(prev => {
+      const next = prev.filter(s => s.id !== sessionId);
+      if (next.length === 0) {
+        // No sessions left — close modal
+        setTimeout(onClose, 0);
+        return next;
+      }
+      // Switch active if needed
+      if (activeSessionIdRef.current === sessionId) {
+        const idx = prev.findIndex(s => s.id === sessionId);
+        const newActive = next[Math.max(0, idx - 1)]?.id ?? next[0]?.id;
+        setActiveSessionId(newActive);
+      }
+      return next;
+    });
+  }, [onClose]);
+
+  // ── Init first session on open ──────────────────────────────────────────
   useEffect(() => {
-    if (!isOpen || !terminalRef.current) return;
-    if (xtermRef.current) return;
+    if (!isOpen) return;
+    if (sessions.length === 0) {
+      const id = nextSessionId();
+      const s = buildSessionState(id, "Session 1");
+      setSessions([s]);
+      setActiveSessionId(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
-    const sessionKey = `${containerId}::${environmentId}`;
-    sessionKeyRef.current = sessionKey;
+  // ── Cleanup all on close ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isOpen) {
+      document.body.style.overflow = "unset";
+      setSessions([]);
+      setActiveSessionId("");
+      return;
+    }
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [isOpen]);
 
-    const host = terminalRef.current;
+  // ── Refit on maximize change ─────────────────────────────────────────────
+  useEffect(() => {
+    if (!isOpen) return;
+    const t = window.setTimeout(() => {
+      const sess = sessionsRef.current.find(s => s.id === activeSessionIdRef.current);
+      if (!sess) return;
+      safeFit(sess.domRef, sess.fitAddon);
+      const d = safeProposeDimensions(sess.domRef, sess.fitAddon);
+      if (sess.socket?.readyState === WebSocket.OPEN && d) {
+        sess.socket.send(JSON.stringify({ type: "resize", data: JSON.stringify({ cols: d.cols, rows: d.rows }) }));
+      }
+      sess.term?.focus();
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [isMaximized, isOpen, activeSessionId]);
 
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+      <div
+        className={`flex flex-col overflow-hidden shadow-2xl transition-all duration-300 border border-white/5 ${isMaximized
+          ? "absolute inset-0 rounded-none"
+          : "h-[76vh] w-full max-w-6xl rounded-2xl"
+          }`}
+        style={{ background: "linear-gradient(180deg, #0f0f12 0%, #0a0a0d 100%)" }}
+      >
+        {/* ── Titlebar ── */}
+        <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#13131a] px-4 py-3 select-none">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center justify-center w-6 h-6 rounded-md bg-blue-500/20 shrink-0">
+              <TerminalIcon size={12} className="text-blue-400" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[13px] font-semibold text-zinc-200 truncate max-w-[260px]">
+                  {containerName}
+                </span>
+                <span className="text-[10px] text-zinc-600 hidden sm:block">
+                  interactive runtime terminal
+                </span>
+              </div>
+              <div className="text-[10px] font-mono text-zinc-600 truncate max-w-[300px]">
+                {containerId}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={async () => {
+                const sess = sessionsRef.current.find(s => s.id === activeSessionIdRef.current);
+                const sel = sess?.term?.getSelection() || "";
+                if (sel) await navigator.clipboard?.writeText(sel);
+              }}
+              className="rounded-md border border-white/5 bg-white/[0.03] p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-white/8 transition-colors"
+              title="Copy selection"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                const text = await navigator.clipboard?.readText();
+                if (!text) return;
+                const sess = sessionsRef.current.find(s => s.id === activeSessionIdRef.current);
+                if (!sess) return;
+                if (sess.fallbackMode) {
+                  const term = sess.term;
+                  if (!term) return;
+                  const cur = sess.fallbackCursor;
+                  const buf = sess.fallbackBuffer;
+                  sess.fallbackBuffer = buf.slice(0, cur) + text + buf.slice(cur);
+                  sess.fallbackCursor = cur + text.length;
+                  term.write(text.replace(/\n/g, "\r\n"));
+                  const tail = sess.fallbackBuffer.slice(sess.fallbackCursor);
+                  if (tail.length > 0) term.write(tail + `\x1b[${tail.length}D`);
+                } else {
+                  sess.socket?.send(JSON.stringify({ type: "input", data: text }));
+                }
+              }}
+              className="rounded-md border border-white/5 bg-white/[0.03] p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-white/8 transition-colors"
+              title="Paste"
+            >
+              <ClipboardPaste className="h-3.5 w-3.5" />
+            </button>
+            <div className="w-px h-4 bg-white/[0.06] mx-0.5" />
+            <button
+              onClick={() => setIsMaximized((v) => !v)}
+              className="rounded-md p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-white/8 transition-colors"
+              title={isMaximized ? "Restore" : "Maximize"}
+            >
+              {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-md p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              title="Close"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+
+        {/* ── Session tabs ── */}
+        <div className="flex items-center border-b border-white/[0.05] bg-[#0f0f14] px-2 gap-1 select-none overflow-x-auto">
+          {sessions.map((sess) => (
+            <SessionTab
+              key={sess.id}
+              session={sess}
+              isActive={sess.id === activeSessionId}
+              onActivate={() => {
+                setActiveSessionId(sess.id);
+                setTimeout(() => {
+                  const s = sessionsRef.current.find(x => x.id === sess.id);
+                  if (s) {
+                    safeFit(s.domRef, s.fitAddon);
+                    s.term?.focus();
+                  }
+                }, 50);
+              }}
+              onClose={() => closeSession(sess.id)}
+            />
+          ))}
+          <button
+            onClick={addSession}
+            className="flex items-center gap-1 px-2 py-1.5 my-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/5 transition-colors shrink-0 text-[11px]"
+            title="New session"
+          >
+            <Plus size={12} />
+          </button>
+        </div>
+
+        {/* ── Terminal panes (one per session, hidden unless active) ── */}
+        <div className="flex-1 min-h-0 bg-[#0a0a0d] relative">
+          {sessions.map((sess) => (
+            <SessionPane
+              key={sess.id}
+              session={sess}
+              isActive={sess.id === activeSessionId}
+              containerId={containerId}
+              containerName={containerName}
+              environmentId={environmentId}
+              showNotif={showNotifRef.current}
+              onStatusChange={(status) => updateSession(sess.id, { connectionStatus: status })}
+              onSessionUpdate={(patch) => {
+                // Mutate the ref immediately for fallback logic
+                const s = sessionsRef.current.find(x => x.id === sess.id);
+                if (s) Object.assign(s, patch);
+                // And update state for UI re-render if needed
+                if (patch.connectionStatus !== undefined) {
+                  updateSession(sess.id, patch);
+                }
+              }}
+            />
+          ))}
+        </div>
+
+        {/* ── Bottom status bar ── */}
+        {(() => {
+          const activeSess = sessions.find(s => s.id === activeSessionId);
+          const cs = activeSess?.connectionStatus ?? "connecting";
+          const statusConfig = {
+            connected: { dot: "bg-emerald-400", label: "live", text: "text-emerald-400" },
+            connecting: { dot: "bg-amber-400 animate-pulse", label: "connecting", text: "text-amber-400" },
+            fallback: { dot: "bg-blue-400", label: "cmd mode", text: "text-blue-400" },
+            error: { dot: "bg-red-400", label: "error", text: "text-red-400" },
+            closed: { dot: "bg-zinc-500", label: "closed", text: "text-zinc-400" },
+          }[cs];
+          return (
+            <div className="flex items-center justify-between border-t border-white/[0.04] bg-[#0d0d12] px-4 py-1 select-none">
+              <div className="flex items-center gap-2">
+                <PlugZap className="h-3 w-3 text-zinc-700" />
+                <span className="font-mono text-[10px] text-zinc-600">
+                  {containerId.substring(0, 12)}
+                </span>
+                <div className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 border shrink-0 ${cs === "connected" ? "border-emerald-500/20 bg-emerald-500/5" :
+                  cs === "connecting" ? "border-amber-500/20 bg-amber-500/5" :
+                    cs === "fallback" ? "border-blue-500/20 bg-blue-500/5" :
+                      "border-zinc-700 bg-zinc-800/50"
+                  }`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${statusConfig.dot}`} />
+                  <span className={`text-[10px] font-bold uppercase tracking-wider ${statusConfig.text}`}>
+                    {statusConfig.label}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 text-[10px] text-zinc-700">
+                <span>↑↓ history</span>
+                <span>Tab complete</span>
+                <span>Ctrl+C cancel</span>
+                <span>Ctrl+A/E line</span>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SessionTab
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SessionTab({
+  session,
+  isActive,
+  onActivate,
+  onClose,
+}: {
+  session: SessionState;
+  isActive: boolean;
+  onActivate: () => void;
+  onClose: () => void;
+}) {
+  const cs = session.connectionStatus;
+  const dotColor =
+    cs === "connected" ? "bg-emerald-400" :
+      cs === "connecting" ? "bg-amber-400 animate-pulse" :
+        cs === "fallback" ? "bg-blue-400" :
+          cs === "error" ? "bg-red-400" :
+            "bg-zinc-600";
+
+  return (
+    <div
+      className={`flex items-center gap-1.5 px-3 py-1.5 my-0.5 rounded text-[11px] font-mono cursor-pointer transition-colors shrink-0 group ${isActive
+        ? "bg-white/8 text-zinc-200 border border-white/8"
+        : "text-zinc-500 hover:text-zinc-300 hover:bg-white/4 border border-transparent"
+        }`}
+      onClick={onActivate}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${dotColor}`} />
+      <span>{session.label}</span>
+      <button
+        onClick={(e) => { e.stopPropagation(); onClose(); }}
+        className="ml-0.5 opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-zinc-300 transition-opacity"
+      >
+        <X size={10} />
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SessionPane — mounts/initialises xterm for one session
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SessionPaneProps {
+  session: SessionState;
+  isActive: boolean;
+  containerId: string;
+  containerName: string;
+  environmentId: string;
+  showNotif: ReturnType<typeof useNotification>["showNotification"];
+  onStatusChange: (s: ConnectionState) => void;
+  onSessionUpdate: (patch: Partial<SessionState>) => void;
+}
+
+function SessionPane({
+  session,
+  isActive,
+  containerId,
+  containerName,
+  environmentId,
+  showNotif,
+  onStatusChange,
+  onSessionUpdate,
+}: SessionPaneProps) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const initializedRef = useRef(false);
+  // Keep a mutable object for fallback state (avoid stale closures)
+  const stateRef = useRef<SessionState>(session);
+  stateRef.current = session;
+
+  const setDomRef = useCallback((el: HTMLDivElement | null) => {
+    hostRef.current = el;
+    onSessionUpdate({ domRef: el });
+  }, [onSessionUpdate]);
+
+  useEffect(() => {
+    if (!hostRef.current || initializedRef.current) return;
+    initializedRef.current = true;
+
+    const host = hostRef.current;
+    const sess = stateRef.current; // mutable ref
+
+    // ── Build xterm ────────────────────────────────────────────────────────
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: "bar",
@@ -186,52 +558,14 @@ export default function TerminalModal({
     term.open(host);
     safeFit(host, fitAddon);
     term.focus();
-    xtermRef.current = term;
-    fitAddonRef.current = fitAddon;
 
-    // Reset state
-    Object.assign(fallbackModeRef, { current: false });
-    fallbackRunningRef.current = false;
-    fallbackBufferRef.current = "";
-    fallbackCursorRef.current = 0;
-    shellCwdRef.current = "/";
-    shellUserRef.current = "root";
-    historyRef.current = [];
-    historyIdxRef.current = -1;
-    tabCompleteRef.current = null;
-
-    // Clipboard shortcuts
-    term.attachCustomKeyEventHandler((event) => {
-      const isMod = event.ctrlKey || event.metaKey;
-      if (isMod && event.key.toLowerCase() === "c" && term.hasSelection()) {
-        void navigator.clipboard?.writeText(term.getSelection());
-        return false;
-      }
-      if (isMod && event.key.toLowerCase() === "v") {
-        void navigator.clipboard?.readText().then((text) => {
-          if (!text) return;
-          if (fallbackModeRef.current) {
-            const cur = fallbackCursorRef.current;
-            const buf = fallbackBufferRef.current;
-            fallbackBufferRef.current = buf.slice(0, cur) + text + buf.slice(cur);
-            fallbackCursorRef.current = cur + text.length;
-            term.write(text.replace(/\n/g, "\r\n"));
-            const tail = fallbackBufferRef.current.slice(fallbackCursorRef.current);
-            if (tail.length > 0) term.write(tail + `\x1b[${tail.length}D`);
-          } else {
-            socketRef.current?.send(JSON.stringify({ type: "input", data: text }));
-          }
-        });
-        return false;
-      }
-      return true;
-    });
+    onSessionUpdate({ term, fitAddon, domRef: host });
 
     // ── Prompt builder ─────────────────────────────────────────────────────
     const buildPrompt = () => {
       const id = containerId.substring(0, 12);
-      const user = shellUserRef.current;
-      const cwd = shellCwdRef.current;
+      const user = stateRef.current.shellUser;
+      const cwd = stateRef.current.shellCwd;
       const sym = user === "root" ? "#" : "$";
       return (
         `\x1b[38;5;114m${user}\x1b[0m` +
@@ -244,19 +578,45 @@ export default function TerminalModal({
     };
 
     const writePrompt = () => {
-      fallbackBufferRef.current = "";
-      fallbackCursorRef.current = 0;
-      tabCompleteRef.current = null;
+      stateRef.current.fallbackBuffer = "";
+      stateRef.current.fallbackCursor = 0;
+      stateRef.current.tabComplete = null;
       term.write(buildPrompt());
+    };
+
+    // ── Helper: replace current line buffer ───────────────────────────────
+    // FIX: always move cursor back to start of buffer before rewriting
+    const setBuffer = (newBuf: string, newCur: number) => {
+      const oldBuf = stateRef.current.fallbackBuffer;
+      const oldCur = stateRef.current.fallbackCursor;
+
+      // Move to start of buffer
+      if (oldCur > 0) term.write(`\x1b[${oldCur}D`);
+
+      // Overwrite with new buffer
+      term.write(newBuf);
+
+      // Erase leftover characters if old buffer was longer
+      const overflow = oldBuf.length - newBuf.length;
+      if (overflow > 0) {
+        term.write(" ".repeat(overflow) + `\x1b[${overflow}D`);
+      }
+
+      // Move cursor to newCur position from end
+      const tailLen = newBuf.length - newCur;
+      if (tailLen > 0) term.write(`\x1b[${tailLen}D`);
+
+      stateRef.current.fallbackBuffer = newBuf;
+      stateRef.current.fallbackCursor = newCur;
     };
 
     // ── Tab autocomplete ───────────────────────────────────────────────────
     const handleTabComplete = async () => {
-      const buf = fallbackBufferRef.current;
-      const cur = fallbackCursorRef.current;
+      const buf = stateRef.current.fallbackBuffer;
+      const cur = stateRef.current.fallbackCursor;
       const prefix = buf.slice(0, cur);
 
-      const tc = tabCompleteRef.current;
+      const tc = stateRef.current.tabComplete;
       if (tc && tc.prefix === prefix && tc.options.length > 0) {
         tc.cursor = (tc.cursor + 1) % tc.options.length;
         const chosen = tc.options[tc.cursor];
@@ -264,7 +624,7 @@ export default function TerminalModal({
         const beforeWord = lastSpaceIdx === -1 ? "" : prefix.slice(0, lastSpaceIdx + 1);
         const newBuf = beforeWord + chosen + buf.slice(cur);
         const newCur = beforeWord.length + chosen.length;
-        _setBuffer(term, newBuf, newCur);
+        setBuffer(newBuf, newCur);
         return;
       }
 
@@ -273,7 +633,7 @@ export default function TerminalModal({
       if (!word) return;
 
       try {
-        const cwd = shellCwdRef.current.replace(/'/g, "'\\''");
+        const cwd = stateRef.current.shellCwd.replace(/'/g, "'\\''");
         const raw = await execShell(
           environmentId,
           containerId,
@@ -286,8 +646,8 @@ export default function TerminalModal({
           const beforeWord2 = lastSpaceIdx === -1 ? "" : prefix.slice(0, lastSpaceIdx + 1);
           const newBuf = beforeWord2 + options[0] + buf.slice(cur);
           const newCur = beforeWord2.length + options[0].length;
-          _setBuffer(term, newBuf, newCur);
-          tabCompleteRef.current = null;
+          setBuffer(newBuf, newCur);
+          stateRef.current.tabComplete = null;
         } else {
           term.write("\r\n");
           const cols = term.cols;
@@ -302,7 +662,7 @@ export default function TerminalModal({
             }
           }
           if (line) term.write("\x1b[90m" + line + "\x1b[0m\r\n");
-          tabCompleteRef.current = { prefix, options, cursor: 0 };
+          stateRef.current.tabComplete = { prefix, options, cursor: 0 };
           term.write(buildPrompt());
           term.write(buf);
           const tail = buf.slice(cur);
@@ -313,26 +673,13 @@ export default function TerminalModal({
       }
     };
 
-    // ── Helper: replace current line buffer ───────────────────────────────
-    const _setBuffer = (term: Terminal, newBuf: string, newCur: number) => {
-      const oldBuf = fallbackBufferRef.current;
-      const oldCur = fallbackCursorRef.current;
-      if (oldCur > 0) term.write(`\x1b[${oldCur}D`);
-      term.write(newBuf);
-      const overflow = oldBuf.length - newBuf.length;
-      if (overflow > 0) term.write(" ".repeat(overflow) + `\x1b[${overflow}D`);
-      const tailLen = newBuf.length - newCur;
-      if (tailLen > 0) term.write(`\x1b[${tailLen}D`);
-      fallbackBufferRef.current = newBuf;
-      fallbackCursorRef.current = newCur;
-    };
-
     // ── Fallback command runner ────────────────────────────────────────────
     const runFallbackCommand = async (rawCmd: string) => {
       const cmd = rawCmd.trim();
 
-      // Built-in: clear — must happen BEFORE \r\n to avoid stray blank line
+      // FIX: clear — write \r\n first so the prompt line ends, then clear
       if (cmd === "clear" || cmd === "cls") {
+        term.write("\r\n");
         term.clear();
         writePrompt();
         return;
@@ -341,40 +688,42 @@ export default function TerminalModal({
       term.write("\r\n");
       if (!cmd) { writePrompt(); return; }
 
-      if (historyRef.current[0] !== cmd) {
-        historyRef.current.unshift(cmd);
-        if (historyRef.current.length > 200) historyRef.current.pop();
+      if (stateRef.current.history[0] !== cmd) {
+        stateRef.current.history.unshift(cmd);
+        if (stateRef.current.history.length > 200) stateRef.current.history.pop();
       }
-      historyIdxRef.current = -1;
-      historySavedCurrentRef.current = "";
+      stateRef.current.historyIdx = -1;
+      stateRef.current.historySavedCurrent = "";
 
-      if (fallbackRunningRef.current) { writePrompt(); return; }
-      fallbackRunningRef.current = true;
-      tabCompleteRef.current = null;
+      if (stateRef.current.fallbackRunning) { writePrompt(); return; }
+      stateRef.current.fallbackRunning = true;
+      stateRef.current.tabComplete = null;
 
       try {
-        const cwd = shellCwdRef.current.replace(/'/g, "'\\''");
-        // Pass terminal dimensions so ls/other tools format output in columns
-        const termEnv = `COLUMNS=${term.cols} LINES=${term.rows}`;
+        const cwd = stateRef.current.shellCwd.replace(/'/g, "'\\''");
+        const cols = term.cols;
+        const rows = term.rows;
 
         if (cmd === "cd" || cmd.startsWith("cd ") || cmd.startsWith("cd\t")) {
           const target = (cmd.slice(2).trim() || "~").replace(/'/g, "'\\''");
           const newCwd = await execShell(
             environmentId,
             containerId,
-            `${termEnv} cd '${cwd}' 2>/dev/null; cd '${target}' && pwd`,
+            `cd '${cwd}' 2>/dev/null; cd '${target}' && pwd`,
           );
           const resolved = newCwd.trim();
-          if (resolved.startsWith("/")) shellCwdRef.current = resolved;
+          if (resolved.startsWith("/")) stateRef.current.shellCwd = resolved;
         } else {
           const SENTINEL = "__EINFRA_CWD__";
-          const fullCmd = `${termEnv} cd '${cwd}' 2>/dev/null; ${cmd}; printf '\\n${SENTINEL}:%s' "$(pwd)"`;
+          const termEnv = `export COLUMNS=${cols} LINES=${rows} TERM=xterm-256color;`;
+          const proxyLs = `ls() { command ls -C --color=auto "$@" 2>/dev/null || command ls -C "$@" 2>/dev/null || command ls "$@"; };`;
+          const fullCmd = `${termEnv} ${proxyLs} cd '${cwd}' 2>/dev/null; ${cmd}; printf '\\n${SENTINEL}:%s' "$(pwd)"`;
           const raw = await execShell(environmentId, containerId, fullCmd);
           const idx = raw.lastIndexOf(`\n${SENTINEL}:`);
           let output = raw;
           if (idx !== -1) {
             const pwdPart = raw.slice(idx + SENTINEL.length + 2).trim();
-            if (pwdPart.startsWith("/")) shellCwdRef.current = pwdPart;
+            if (pwdPart.startsWith("/")) stateRef.current.shellCwd = pwdPart;
             output = raw.slice(0, idx);
           }
           if (output) {
@@ -386,16 +735,17 @@ export default function TerminalModal({
       } catch (err) {
         term.write(`\x1b[31m${err instanceof Error ? err.message : "error"}\x1b[0m\r\n`);
       } finally {
-        fallbackRunningRef.current = false;
+        stateRef.current.fallbackRunning = false;
         writePrompt();
       }
     };
 
     // ── Enable fallback mode ───────────────────────────────────────────────
     const enableFallbackMode = async (reason?: string) => {
-      if (fallbackModeRef.current) return;
-      fallbackModeRef.current = true;
-      setConnectionStatus("fallback");
+      if (stateRef.current.fallbackMode) return;
+      stateRef.current.fallbackMode = true;
+      onStatusChange("fallback");
+      onSessionUpdate({ fallbackMode: true, connectionStatus: "fallback" });
       term.writeln("");
       if (reason) term.writeln(`\x1b[33m${reason}\x1b[0m`);
       term.writeln(
@@ -404,12 +754,12 @@ export default function TerminalModal({
       try {
         const u = await execShell(environmentId, containerId, "id -un 2>/dev/null || whoami || echo root");
         const p = u.trim();
-        if (p) shellUserRef.current = p;
+        if (p) stateRef.current.shellUser = p;
       } catch { /* default root */ }
       try {
         const p = await execShell(environmentId, containerId, "pwd");
         const parsed = p.trim();
-        if (parsed.startsWith("/")) shellCwdRef.current = parsed;
+        if (parsed.startsWith("/")) stateRef.current.shellCwd = parsed;
       } catch { /* default / */ }
       writePrompt();
     };
@@ -418,7 +768,7 @@ export default function TerminalModal({
     term.writeln(
       `\x1b[90mConnecting to \x1b[0m\x1b[1m${containerName}\x1b[0m \x1b[90m(${containerId.substring(0, 12)})…\x1b[0m`,
     );
-    setConnectionStatus("connecting");
+    onStatusChange("connecting");
 
     const socket = new WebSocket(
       buildApiWebSocketUrl(
@@ -426,13 +776,14 @@ export default function TerminalModal({
       ),
     );
     socket.binaryType = "arraybuffer";
-    socketRef.current = socket;
+    stateRef.current.socket = socket;
+    onSessionUpdate({ socket });
 
     let established = false;
     let receivedOutput = false;
 
     const sendResize = () => {
-      const d = safeProposeDimensions(terminalRef.current, fitAddon);
+      const d = safeProposeDimensions(host, fitAddon);
       if (socket.readyState === WebSocket.OPEN && d) {
         socket.send(JSON.stringify({ type: "resize", data: JSON.stringify({ cols: d.cols, rows: d.rows }) }));
       }
@@ -446,7 +797,8 @@ export default function TerminalModal({
 
     socket.onopen = () => {
       established = true;
-      setConnectionStatus("connected");
+      onStatusChange("connected");
+      onSessionUpdate({ connectionStatus: "connected" });
       window.clearTimeout(connectionTimeout);
       term.writeln("\x1b[32mInteractive shell connected.\x1b[0m");
       socket.send(JSON.stringify({ type: "input", data: "\n" }));
@@ -455,13 +807,13 @@ export default function TerminalModal({
 
     socket.onmessage = (event: MessageEvent) => {
       established = true;
-      setConnectionStatus("connected");
+      onStatusChange("connected");
       if (typeof event.data !== "string") {
         if (!receivedOutput) {
           receivedOutput = true;
           if (promptTimeout !== null) window.clearTimeout(promptTimeout);
         }
-        void new Response(event.data as ArrayBuffer).text().then((t) => xtermRef.current?.write(t));
+        void new Response(event.data as ArrayBuffer).text().then((t) => term.write(t));
         return;
       }
       try {
@@ -472,7 +824,8 @@ export default function TerminalModal({
           return;
         }
         if (msg.type === "status" && msg.status === "closed") {
-          setConnectionStatus((c) => (c === "fallback" ? c : "closed"));
+          onStatusChange("closed");
+          onSessionUpdate({ connectionStatus: "closed" });
           term.writeln("\r\nSession closed.");
           return;
         }
@@ -487,7 +840,7 @@ export default function TerminalModal({
 
     socket.onerror = () => {
       window.clearTimeout(connectionTimeout);
-      showNotifRef.current({
+      showNotif({
         type: "warning",
         message: "Docker terminal fallback",
         description: `WebSocket exec unavailable for ${containerName}. Switched to command mode.`,
@@ -501,13 +854,16 @@ export default function TerminalModal({
         void enableFallbackMode("Connection closed before shell was ready.");
         return;
       }
-      setConnectionStatus((c) => (c === "fallback" || c === "error" ? c : "closed"));
-      if (!fallbackModeRef.current) term.writeln("\r\nSession closed.");
+      if (!stateRef.current.fallbackMode) {
+        onStatusChange("closed");
+        onSessionUpdate({ connectionStatus: "closed" });
+        term.writeln("\r\nSession closed.");
+      }
     };
 
     promptTimeout = window.setTimeout(() => {
-      if (!fallbackModeRef.current && socket.readyState === WebSocket.OPEN && !receivedOutput) {
-        showNotifRef.current({
+      if (!stateRef.current.fallbackMode && socket.readyState === WebSocket.OPEN && !receivedOutput) {
+        showNotif({
           type: "warning",
           message: "Docker terminal fallback",
           description: `Shell did not respond for ${containerName}. Switched to command mode.`,
@@ -516,16 +872,42 @@ export default function TerminalModal({
       }
     }, 4000);
 
+    // ── Clipboard shortcuts ────────────────────────────────────────────────
+    term.attachCustomKeyEventHandler((event) => {
+      const isMod = event.ctrlKey || event.metaKey;
+      if (isMod && event.key.toLowerCase() === "c" && term.hasSelection()) {
+        void navigator.clipboard?.writeText(term.getSelection());
+        return false;
+      }
+      if (isMod && event.key.toLowerCase() === "v") {
+        void navigator.clipboard?.readText().then((text) => {
+          if (!text) return;
+          if (stateRef.current.fallbackMode) {
+            const cur = stateRef.current.fallbackCursor;
+            const buf = stateRef.current.fallbackBuffer;
+            stateRef.current.fallbackBuffer = buf.slice(0, cur) + text + buf.slice(cur);
+            stateRef.current.fallbackCursor = cur + text.length;
+            term.write(text.replace(/\n/g, "\r\n"));
+            const tail = stateRef.current.fallbackBuffer.slice(stateRef.current.fallbackCursor);
+            if (tail.length > 0) term.write(tail + `\x1b[${tail.length}D`);
+          } else {
+            socket.send(JSON.stringify({ type: "input", data: text }));
+          }
+        });
+        return false;
+      }
+      return true;
+    });
+
     // ── Input handler ──────────────────────────────────────────────────────
     const disposable = term.onData((data: string) => {
-      if (fallbackModeRef.current) {
-        // Any key except Tab resets tab complete cycling
-        if (data !== "\t") tabCompleteRef.current = null;
+      if (stateRef.current.fallbackMode) {
+        if (data !== "\t") stateRef.current.tabComplete = null;
 
         if (data === "\r") {
-          const cmd = fallbackBufferRef.current;
-          fallbackBufferRef.current = "";
-          fallbackCursorRef.current = 0;
+          const cmd = stateRef.current.fallbackBuffer;
+          stateRef.current.fallbackBuffer = "";
+          stateRef.current.fallbackCursor = 0;
           void runFallbackCommand(cmd);
           return;
         }
@@ -533,13 +915,13 @@ export default function TerminalModal({
 
         // Backspace
         if (data === "\u007F") {
-          const cur = fallbackCursorRef.current;
+          const cur = stateRef.current.fallbackCursor;
           if (cur > 0) {
-            const buf = fallbackBufferRef.current;
-            fallbackBufferRef.current = buf.slice(0, cur - 1) + buf.slice(cur);
-            fallbackCursorRef.current = cur - 1;
+            const buf = stateRef.current.fallbackBuffer;
+            stateRef.current.fallbackBuffer = buf.slice(0, cur - 1) + buf.slice(cur);
+            stateRef.current.fallbackCursor = cur - 1;
             term.write("\b");
-            const tail = fallbackBufferRef.current.slice(fallbackCursorRef.current);
+            const tail = stateRef.current.fallbackBuffer.slice(stateRef.current.fallbackCursor);
             term.write(tail + " ");
             if (tail.length + 1 > 0) term.write(`\x1b[${tail.length + 1}D`);
           }
@@ -547,11 +929,11 @@ export default function TerminalModal({
         }
         // Delete
         if (data === "\x1b[3~") {
-          const cur = fallbackCursorRef.current;
-          const buf = fallbackBufferRef.current;
+          const cur = stateRef.current.fallbackCursor;
+          const buf = stateRef.current.fallbackBuffer;
           if (cur < buf.length) {
-            fallbackBufferRef.current = buf.slice(0, cur) + buf.slice(cur + 1);
-            const tail = fallbackBufferRef.current.slice(cur);
+            stateRef.current.fallbackBuffer = buf.slice(0, cur) + buf.slice(cur + 1);
+            const tail = stateRef.current.fallbackBuffer.slice(cur);
             term.write(tail + " ");
             if (tail.length + 1 > 0) term.write(`\x1b[${tail.length + 1}D`);
           }
@@ -559,91 +941,104 @@ export default function TerminalModal({
         }
         // Arrow Left
         if (data === "\x1b[D") {
-          if (fallbackCursorRef.current > 0) { fallbackCursorRef.current--; term.write("\x1b[D"); }
+          if (stateRef.current.fallbackCursor > 0) {
+            stateRef.current.fallbackCursor--;
+            term.write("\x1b[D");
+          }
           return;
         }
         // Arrow Right
         if (data === "\x1b[C") {
-          if (fallbackCursorRef.current < fallbackBufferRef.current.length) { fallbackCursorRef.current++; term.write("\x1b[C"); }
+          if (stateRef.current.fallbackCursor < stateRef.current.fallbackBuffer.length) {
+            stateRef.current.fallbackCursor++;
+            term.write("\x1b[C");
+          }
           return;
         }
         // Home / Ctrl+A
         if (data === "\x1b[H" || data === "\x01") {
-          const n = fallbackCursorRef.current;
-          if (n > 0) { term.write(`\x1b[${n}D`); fallbackCursorRef.current = 0; }
+          const n = stateRef.current.fallbackCursor;
+          if (n > 0) { term.write(`\x1b[${n}D`); stateRef.current.fallbackCursor = 0; }
           return;
         }
         // End / Ctrl+E
         if (data === "\x1b[F" || data === "\x05") {
-          const remaining = fallbackBufferRef.current.length - fallbackCursorRef.current;
-          if (remaining > 0) { term.write(`\x1b[${remaining}C`); fallbackCursorRef.current = fallbackBufferRef.current.length; }
+          const remaining = stateRef.current.fallbackBuffer.length - stateRef.current.fallbackCursor;
+          if (remaining > 0) {
+            term.write(`\x1b[${remaining}C`);
+            stateRef.current.fallbackCursor = stateRef.current.fallbackBuffer.length;
+          }
           return;
         }
-        // Arrow Up (history prev)
+        // Arrow Up — history prev
         if (data === "\x1b[A") {
-          const hist = historyRef.current;
+          const hist = stateRef.current.history;
           if (hist.length === 0) return;
-          if (historyIdxRef.current === -1) historySavedCurrentRef.current = fallbackBufferRef.current;
-          const newIdx = Math.min(historyIdxRef.current + 1, hist.length - 1);
-          historyIdxRef.current = newIdx;
-          _setBuffer(term, hist[newIdx], hist[newIdx].length);
+          if (stateRef.current.historyIdx === -1) {
+            stateRef.current.historySavedCurrent = stateRef.current.fallbackBuffer;
+          }
+          const newIdx = Math.min(stateRef.current.historyIdx + 1, hist.length - 1);
+          stateRef.current.historyIdx = newIdx;
+          setBuffer(hist[newIdx], hist[newIdx].length);
           return;
         }
-        // Arrow Down (history next)
+        // Arrow Down — history next
         if (data === "\x1b[B") {
-          if (historyIdxRef.current === -1) return;
-          const newIdx = historyIdxRef.current - 1;
-          historyIdxRef.current = newIdx;
-          const text = newIdx === -1 ? historySavedCurrentRef.current : historyRef.current[newIdx];
-          _setBuffer(term, text, text.length);
+          if (stateRef.current.historyIdx === -1) return;
+          const newIdx = stateRef.current.historyIdx - 1;
+          stateRef.current.historyIdx = newIdx;
+          const text = newIdx === -1
+            ? stateRef.current.historySavedCurrent
+            : stateRef.current.history[newIdx];
+          setBuffer(text, text.length);
           return;
         }
         // Ctrl+C
         if (data === "\u0003") {
-          const buf = fallbackBufferRef.current;
-          const cur = fallbackCursorRef.current;
+          const buf = stateRef.current.fallbackBuffer;
+          const cur = stateRef.current.fallbackCursor;
           const tail = buf.length - cur;
           if (tail > 0) term.write(`\x1b[${tail}C`);
-          fallbackBufferRef.current = "";
-          fallbackCursorRef.current = 0;
-          historyIdxRef.current = -1;
+          stateRef.current.fallbackBuffer = "";
+          stateRef.current.fallbackCursor = 0;
+          stateRef.current.historyIdx = -1;
           term.write("^C\r\n");
           writePrompt();
           return;
         }
         // Ctrl+U (clear left)
         if (data === "\u0015") {
-          const cur = fallbackCursorRef.current;
+          const cur = stateRef.current.fallbackCursor;
           if (cur === 0) return;
           term.write(`\x1b[${cur}D`);
-          const tail = fallbackBufferRef.current.slice(cur);
-          fallbackBufferRef.current = tail;
-          fallbackCursorRef.current = 0;
+          const tail = stateRef.current.fallbackBuffer.slice(cur);
+          stateRef.current.fallbackBuffer = tail;
+          stateRef.current.fallbackCursor = 0;
           term.write(tail + " ".repeat(cur));
           if (tail.length + cur > 0) term.write(`\x1b[${tail.length + cur}D`);
           return;
         }
         // Ctrl+K (clear right)
         if (data === "\u000B") {
-          const cur = fallbackCursorRef.current;
-          const buf = fallbackBufferRef.current;
+          const cur = stateRef.current.fallbackCursor;
+          const buf = stateRef.current.fallbackBuffer;
           const right = buf.length - cur;
           if (right === 0) return;
           term.write(" ".repeat(right) + `\x1b[${right}D`);
-          fallbackBufferRef.current = buf.slice(0, cur);
+          stateRef.current.fallbackBuffer = buf.slice(0, cur);
           return;
         }
         // Ctrl+W (delete word left)
         if (data === "\u0017") {
-          const cur = fallbackCursorRef.current;
-          const buf = fallbackBufferRef.current;
+          const cur = stateRef.current.fallbackCursor;
+          const buf = stateRef.current.fallbackBuffer;
           const left = buf.slice(0, cur);
           const wordEnd = left.trimEnd().replace(/\S+$/, "");
           const removed = cur - wordEnd.length;
           if (removed === 0) return;
           const newBuf = wordEnd + buf.slice(cur);
-          fallbackBufferRef.current = newBuf;
-          fallbackCursorRef.current = wordEnd.length;
+          stateRef.current.fallbackBuffer = newBuf;
+          stateRef.current.fallbackCursor = wordEnd.length;
           term.write(`\x1b[${removed}D`);
           const tail = newBuf.slice(wordEnd.length);
           term.write(tail + " ".repeat(removed));
@@ -652,12 +1047,12 @@ export default function TerminalModal({
         }
         // Printable
         if (data.length === 1 && data.charCodeAt(0) >= 32) {
-          const cur = fallbackCursorRef.current;
-          const buf = fallbackBufferRef.current;
-          fallbackBufferRef.current = buf.slice(0, cur) + data + buf.slice(cur);
-          fallbackCursorRef.current = cur + 1;
+          const cur = stateRef.current.fallbackCursor;
+          const buf = stateRef.current.fallbackBuffer;
+          stateRef.current.fallbackBuffer = buf.slice(0, cur) + data + buf.slice(cur);
+          stateRef.current.fallbackCursor = cur + 1;
           term.write(data);
-          const tail = fallbackBufferRef.current.slice(fallbackCursorRef.current);
+          const tail = stateRef.current.fallbackBuffer.slice(stateRef.current.fallbackCursor);
           if (tail.length > 0) term.write(tail + `\x1b[${tail.length}D`);
         }
         return;
@@ -672,179 +1067,28 @@ export default function TerminalModal({
       sendResize();
     };
     window.addEventListener("resize", handleResize);
-    document.body.style.overflow = "hidden";
 
     return () => {
-      if (sessionKeyRef.current !== sessionKey) return;
       disposable.dispose();
       window.clearTimeout(connectionTimeout);
       if (promptTimeout !== null) window.clearTimeout(promptTimeout);
       window.removeEventListener("resize", handleResize);
-      document.body.style.overflow = "unset";
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: "close", data: "" }));
         socket.close();
       }
       term.dispose();
-      xtermRef.current = null;
-      fitAddonRef.current = null;
-      socketRef.current = null;
-      fallbackModeRef.current = false;
-      fallbackRunningRef.current = false;
-      fallbackBufferRef.current = "";
-      fallbackCursorRef.current = 0;
+      initializedRef.current = false;
     };
-  }, [containerId, containerName, environmentId, isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!isOpen) document.body.style.overflow = "unset";
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const t = window.setTimeout(() => {
-      safeFit(terminalRef.current, fitAddonRef.current);
-      const d = safeProposeDimensions(terminalRef.current, fitAddonRef.current);
-      if (socketRef.current?.readyState === WebSocket.OPEN && d) {
-        socketRef.current.send(
-          JSON.stringify({ type: "resize", data: JSON.stringify({ cols: d.cols, rows: d.rows }) }),
-        );
-      }
-      xtermRef.current?.focus();
-    }, 200);
-    return () => window.clearTimeout(t);
-  }, [isMaximized, isOpen]);
-
-  if (!isOpen) return null;
-
-  const statusConfig = {
-    connected: { dot: "bg-emerald-400", label: "live", text: "text-emerald-400" },
-    connecting: { dot: "bg-amber-400 animate-pulse", label: "connecting", text: "text-amber-400" },
-    fallback: { dot: "bg-blue-400", label: "cmd mode", text: "text-blue-400" },
-    error: { dot: "bg-red-400", label: "error", text: "text-red-400" },
-    closed: { dot: "bg-zinc-500", label: "closed", text: "text-zinc-400" },
-  }[connectionStatus];
-
-  const copySelection = async () => {
-    const sel = xtermRef.current?.getSelection() || "";
-    if (sel) await navigator.clipboard?.writeText(sel);
-  };
-
-  const pasteClipboard = async () => {
-    const text = await navigator.clipboard?.readText();
-    if (!text) return;
-    if (fallbackModeRef.current) {
-      const term = xtermRef.current;
-      if (!term) return;
-      const cur = fallbackCursorRef.current;
-      const buf = fallbackBufferRef.current;
-      fallbackBufferRef.current = buf.slice(0, cur) + text + buf.slice(cur);
-      fallbackCursorRef.current = cur + text.length;
-      term.write(text.replace(/\n/g, "\r\n"));
-      const tail = fallbackBufferRef.current.slice(fallbackCursorRef.current);
-      if (tail.length > 0) term.write(tail + `\x1b[${tail.length}D`);
-    } else {
-      socketRef.current?.send(JSON.stringify({ type: "input", data: text }));
-    }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
-      <div
-        className={`flex flex-col overflow-hidden shadow-2xl transition-all duration-300 border border-white/5 ${
-          isMaximized
-            ? "absolute inset-0 rounded-none"
-            : "h-[76vh] w-full max-w-6xl rounded-2xl"
-        }`}
-        style={{ background: "linear-gradient(180deg, #0f0f12 0%, #0a0a0d 100%)" }}
-      >
-        {/* ── Titlebar ── */}
-        <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#13131a] px-4 py-3 select-none">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="flex items-center justify-center w-6 h-6 rounded-md bg-blue-500/20 shrink-0">
-              <TerminalIcon size={12} className="text-blue-400" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[13px] font-semibold text-zinc-200 truncate max-w-[260px]">
-                  {containerName}
-                </span>
-                <span className="text-[10px] text-zinc-600 hidden sm:block">
-                  interactive runtime terminal
-                </span>
-              </div>
-              <div className="text-[10px] font-mono text-zinc-600 truncate max-w-[300px]">
-                {containerId}
-              </div>
-            </div>
-            <div className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 border shrink-0 ${
-              connectionStatus === "connected" ? "border-emerald-500/20 bg-emerald-500/5" :
-              connectionStatus === "connecting" ? "border-amber-500/20 bg-amber-500/5" :
-              connectionStatus === "fallback" ? "border-blue-500/20 bg-blue-500/5" :
-              "border-zinc-700 bg-zinc-800/50"
-            }`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${statusConfig.dot}`} />
-              <span className={`text-[10px] font-bold uppercase tracking-wider ${statusConfig.text}`}>
-                {statusConfig.label}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              type="button"
-              onClick={() => void copySelection()}
-              className="rounded-md border border-white/5 bg-white/[0.03] p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-white/8 transition-colors"
-              title="Copy selection"
-            >
-              <ClipboardCopy className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => void pasteClipboard()}
-              className="rounded-md border border-white/5 bg-white/[0.03] p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-white/8 transition-colors"
-              title="Paste"
-            >
-              <ClipboardPaste className="h-3.5 w-3.5" />
-            </button>
-            <div className="w-px h-4 bg-white/[0.06] mx-0.5" />
-            <button
-              onClick={() => setIsMaximized((v) => !v)}
-              className="rounded-md p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-white/8 transition-colors"
-              title={isMaximized ? "Restore" : "Maximize"}
-            >
-              {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            </button>
-            <button
-              onClick={onClose}
-              className="rounded-md p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-              title="Close"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-
-        {/* ── xterm canvas ── */}
-        <div className="flex-1 min-h-0 bg-[#0a0a0d]" style={{ padding: "10px 12px" }}>
-          <div ref={terminalRef} className="h-full w-full" />
-        </div>
-
-        {/* ── Bottom status bar ── */}
-        <div className="flex items-center justify-between border-t border-white/[0.04] bg-[#0d0d12] px-4 py-1 select-none">
-          <div className="flex items-center gap-1.5">
-            <PlugZap className="h-3 w-3 text-zinc-700" />
-            <span className="font-mono text-[10px] text-zinc-600">
-              {containerId.substring(0, 12)}
-            </span>
-          </div>
-          <div className="flex items-center gap-3 text-[10px] text-zinc-700">
-            <span>↑↓ history</span>
-            <span>Tab complete</span>
-            <span>Ctrl+C cancel</span>
-            <span>Ctrl+A/E line</span>
-          </div>
-        </div>
-      </div>
+    <div
+      className="absolute inset-0"
+      style={{ display: isActive ? "block" : "none", padding: "10px 12px" }}
+    >
+      <div ref={setDomRef} className="h-full w-full" />
     </div>
   );
 }

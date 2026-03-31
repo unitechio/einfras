@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowUpRight, Code, LayoutTemplate, Play, Search, Server } from "lucide-react";
+import {
+  ArrowUpRight,
+  Code,
+  LayoutTemplate,
+  Play,
+  Search,
+  Server,
+} from "lucide-react";
 
 import { useEnvironmentInventory } from "../../kubernetes/api/useEnvironmentInventory";
 import { Button } from "@/shared/ui/Button";
@@ -19,29 +26,190 @@ type TemplateItem = {
 };
 
 const APP_TEMPLATES: TemplateItem[] = [
-  { title: "NGINX", image: "nginx:stable-alpine", description: "Lightweight reverse proxy and static web server for frontends and API edges.", logo: "https://hub.docker.com/api/content/v1/products/images/nginx/icon", stack: "Edge delivery" },
-  { title: "Traefik", image: "traefik:v3.1", description: "Dynamic ingress proxy with Docker-native service discovery and dashboard support.", logo: "https://doc.traefik.io/traefik/assets/img/traefik.logo.png", stack: "Ingress" },
-  { title: "Caddy", image: "caddy:2-alpine", description: "Modern web server with automatic HTTPS and clean app delivery defaults.", logo: "https://caddyserver.com/resources/images/caddy-logo.svg", stack: "Edge delivery" },
-  { title: "WordPress", image: "wordpress:latest", description: "Content management system for blogs, landing pages, and internal publishing portals.", logo: "https://hub.docker.com/api/content/v1/products/images/wordpress/icon", stack: "Content platform" },
-  { title: "Ghost", image: "ghost:5-alpine", description: "Modern publishing platform for teams shipping product docs and editorial content.", logo: "https://ghost.org/images/logos/ghost-logo-orb.png", stack: "Content platform" },
-  { title: "Node.js", image: "node:20-alpine", description: "Application runtime for JavaScript services, workers, and API backends.", logo: "https://hub.docker.com/api/content/v1/products/images/node/icon", stack: "App runtime" },
-  { title: "Python", image: "python:3.12-alpine", description: "General-purpose runtime for automation, APIs, and data-processing workloads.", logo: "https://www.python.org/static/community_logos/python-logo.png", stack: "App runtime" },
-  { title: "PostgreSQL", image: "postgres:16", description: "Relational database for production applications, analytics, and transactional workloads.", logo: "https://hub.docker.com/api/content/v1/products/images/postgres/icon", stack: "Primary database" },
-  { title: "MariaDB", image: "mariadb:11", description: "Drop-in MySQL-compatible database engine for app stacks and legacy workloads.", logo: "https://hub.docker.com/api/content/v1/products/images/mariadb/icon", stack: "Primary database" },
-  { title: "MongoDB", image: "mongo:7", description: "Document database suited for flexible application schemas and event-heavy services.", logo: "https://www.mongodb.com/assets/images/global/leaf.png", stack: "Document database" },
-  { title: "Redis", image: "redis:7-alpine", description: "High-performance in-memory cache, queue, and session store for distributed systems.", logo: "https://hub.docker.com/api/content/v1/products/images/redis/icon", stack: "Caching layer" },
-  { title: "Memcached", image: "memcached:1.6-alpine", description: "Simple distributed memory cache for low-latency response acceleration.", logo: "https://hub.docker.com/api/content/v1/products/images/memcached/icon", stack: "Caching layer" },
-  { title: "RabbitMQ", image: "rabbitmq:3-management", description: "Reliable messaging broker with management UI for queue-based workloads.", logo: "https://www.rabbitmq.com/img/rabbitmq-logo.svg", stack: "Messaging" },
-  { title: "Kafka UI", image: "provectuslabs/kafka-ui:latest", description: "Operations UI for Kafka clusters, topics, consumer groups, and broker insight.", logo: "https://raw.githubusercontent.com/provectus/kafka-ui/master/documentation/images/kafka-ui-logo.svg", stack: "Messaging ops" },
-  { title: "Grafana", image: "grafana/grafana:latest", description: "Observability dashboards for metrics, logs, tracing, and runtime health views.", logo: "https://upload.wikimedia.org/wikipedia/commons/a/a1/Grafana_logo.svg", stack: "Observability" },
-  { title: "Prometheus", image: "prom/prometheus:latest", description: "Metrics collection and alerting engine for platform and application monitoring.", logo: "https://prometheus.io/assets/prometheus_logo_grey.svg", stack: "Observability" },
-  { title: "Loki", image: "grafana/loki:latest", description: "Horizontal-friendly log backend built to pair with Grafana observability stacks.", logo: "https://grafana.com/static/assets/img/logos/logo-loki.svg", stack: "Log platform" },
-  { title: "MinIO", image: "minio/minio:latest", description: "S3-compatible object storage for backups, artifacts, and media workloads.", logo: "https://min.io/resources/img/logo/MINIO_Bird.png", stack: "Object storage" },
-  { title: "Vault", image: "hashicorp/vault:latest", description: "Secrets management platform for dynamic credentials, tokens, and policy control.", logo: "https://www.datocms-assets.com/2885/1620155117-brandvaultprimaryattributedcolor.svg", stack: "Secrets security" },
-  { title: "Keycloak", image: "quay.io/keycloak/keycloak:25.0", description: "Identity and access management server for SSO, OAuth2, and user federation.", logo: "https://www.keycloak.org/resources/images/keycloak_logo_200px.svg", stack: "Identity" },
-  { title: "Portainer Agent", image: "portainer/agent:latest", description: "Agent-based remote runtime operations for multi-host Docker management.", logo: "https://www.portainer.io/hubfs/Brand/Portainer%20Logo%20Blue.svg", stack: "Runtime ops" },
-  { title: "Gitea", image: "gitea/gitea:latest", description: "Self-hosted Git service for internal repositories, review, and lightweight CI workflows.", logo: "https://about.gitea.com/images/gitea.png", stack: "Developer platform" },
-  { title: "Jenkins", image: "jenkins/jenkins:lts", description: "Automation server for CI/CD orchestration and plugin-based build pipelines.", logo: "https://www.jenkins.io/images/logos/jenkins/jenkins.svg", stack: "Delivery automation" },
+  {
+    title: "NGINX",
+    image: "nginx:stable-alpine",
+    description:
+      "Lightweight reverse proxy and static web server for frontends and API edges.",
+    logo: "https://hub.docker.com/api/content/v1/products/images/nginx/icon",
+    stack: "Edge delivery",
+  },
+  {
+    title: "Traefik",
+    image: "traefik:v3.1",
+    description:
+      "Dynamic ingress proxy with Docker-native service discovery and dashboard support.",
+    logo: "https://doc.traefik.io/traefik/assets/img/traefik.logo.png",
+    stack: "Ingress",
+  },
+  {
+    title: "Caddy",
+    image: "caddy:2-alpine",
+    description:
+      "Modern web server with automatic HTTPS and clean app delivery defaults.",
+    logo: "https://caddyserver.com/resources/images/caddy-logo.svg",
+    stack: "Edge delivery",
+  },
+  {
+    title: "WordPress",
+    image: "wordpress:latest",
+    description:
+      "Content management system for blogs, landing pages, and internal publishing portals.",
+    logo: "https://hub.docker.com/api/content/v1/products/images/wordpress/icon",
+    stack: "Content platform",
+  },
+  {
+    title: "Ghost",
+    image: "ghost:5-alpine",
+    description:
+      "Modern publishing platform for teams shipping product docs and editorial content.",
+    logo: "https://ghost.org/images/logos/ghost-logo-orb.png",
+    stack: "Content platform",
+  },
+  {
+    title: "Node.js",
+    image: "node:20-alpine",
+    description:
+      "Application runtime for JavaScript services, workers, and API backends.",
+    logo: "https://hub.docker.com/api/content/v1/products/images/node/icon",
+    stack: "App runtime",
+  },
+  {
+    title: "Python",
+    image: "python:3.12-alpine",
+    description:
+      "General-purpose runtime for automation, APIs, and data-processing workloads.",
+    logo: "https://www.python.org/static/community_logos/python-logo.png",
+    stack: "App runtime",
+  },
+  {
+    title: "PostgreSQL",
+    image: "postgres:16",
+    description:
+      "Relational database for production applications, analytics, and transactional workloads.",
+    logo: "https://hub.docker.com/api/content/v1/products/images/postgres/icon",
+    stack: "Primary database",
+  },
+  {
+    title: "MariaDB",
+    image: "mariadb:11",
+    description:
+      "Drop-in MySQL-compatible database engine for app stacks and legacy workloads.",
+    logo: "https://hub.docker.com/api/content/v1/products/images/mariadb/icon",
+    stack: "Primary database",
+  },
+  {
+    title: "MongoDB",
+    image: "mongo:7",
+    description:
+      "Document database suited for flexible application schemas and event-heavy services.",
+    logo: "https://www.mongodb.com/assets/images/global/leaf.png",
+    stack: "Document database",
+  },
+  {
+    title: "Redis",
+    image: "redis:7-alpine",
+    description:
+      "High-performance in-memory cache, queue, and session store for distributed systems.",
+    logo: "https://hub.docker.com/api/content/v1/products/images/redis/icon",
+    stack: "Caching layer",
+  },
+  {
+    title: "Memcached",
+    image: "memcached:1.6-alpine",
+    description:
+      "Simple distributed memory cache for low-latency response acceleration.",
+    logo: "https://hub.docker.com/api/content/v1/products/images/memcached/icon",
+    stack: "Caching layer",
+  },
+  {
+    title: "RabbitMQ",
+    image: "rabbitmq:3-management",
+    description:
+      "Reliable messaging broker with management UI for queue-based workloads.",
+    logo: "https://www.rabbitmq.com/img/rabbitmq-logo.svg",
+    stack: "Messaging",
+  },
+  {
+    title: "Kafka UI",
+    image: "provectuslabs/kafka-ui:latest",
+    description:
+      "Operations UI for Kafka clusters, topics, consumer groups, and broker insight.",
+    logo: "https://raw.githubusercontent.com/provectus/kafka-ui/master/documentation/images/kafka-ui-logo.svg",
+    stack: "Messaging ops",
+  },
+  {
+    title: "Grafana",
+    image: "grafana/grafana:latest",
+    description:
+      "Observability dashboards for metrics, logs, tracing, and runtime health views.",
+    logo: "https://upload.wikimedia.org/wikipedia/commons/a/a1/Grafana_logo.svg",
+    stack: "Observability",
+  },
+  {
+    title: "Prometheus",
+    image: "prom/prometheus:latest",
+    description:
+      "Metrics collection and alerting engine for platform and application monitoring.",
+    logo: "https://prometheus.io/assets/prometheus_logo_grey.svg",
+    stack: "Observability",
+  },
+  {
+    title: "Loki",
+    image: "grafana/loki:latest",
+    description:
+      "Horizontal-friendly log backend built to pair with Grafana observability stacks.",
+    logo: "https://grafana.com/static/assets/img/logos/logo-loki.svg",
+    stack: "Log platform",
+  },
+  {
+    title: "MinIO",
+    image: "minio/minio:latest",
+    description:
+      "S3-compatible object storage for backups, artifacts, and media workloads.",
+    logo: "https://min.io/resources/img/logo/MINIO_Bird.png",
+    stack: "Object storage",
+  },
+  {
+    title: "Vault",
+    image: "hashicorp/vault:latest",
+    description:
+      "Secrets management platform for dynamic credentials, tokens, and policy control.",
+    logo: "https://www.datocms-assets.com/2885/1620155117-brandvaultprimaryattributedcolor.svg",
+    stack: "Secrets security",
+  },
+  {
+    title: "Keycloak",
+    image: "quay.io/keycloak/keycloak:25.0",
+    description:
+      "Identity and access management server for SSO, OAuth2, and user federation.",
+    logo: "https://www.keycloak.org/resources/images/keycloak_logo_200px.svg",
+    stack: "Identity",
+  },
+  {
+    title: "Portainer Agent",
+    image: "portainer/agent:latest",
+    description:
+      "Agent-based remote runtime operations for multi-host Docker management.",
+    logo: "https://www.portainer.io/hubfs/Brand/Portainer%20Logo%20Blue.svg",
+    stack: "Runtime ops",
+  },
+  {
+    title: "Gitea",
+    image: "gitea/gitea:latest",
+    description:
+      "Self-hosted Git service for internal repositories, review, and lightweight CI workflows.",
+    logo: "https://about.gitea.com/images/gitea.png",
+    stack: "Developer platform",
+  },
+  {
+    title: "Jenkins",
+    image: "jenkins/jenkins:lts",
+    description:
+      "Automation server for CI/CD orchestration and plugin-based build pipelines.",
+    logo: "https://www.jenkins.io/images/logos/jenkins/jenkins.svg",
+    stack: "Delivery automation",
+  },
 ];
 
 const fallbackLogo =
@@ -51,7 +219,8 @@ const PAGE_SIZE = 9;
 
 export default function TemplatesPage() {
   const navigate = useNavigate();
-  const { data: inventory = [], isLoading: isLoadingServers } = useEnvironmentInventory();
+  const { data: inventory = [], isLoading: isLoadingServers } =
+    useEnvironmentInventory();
   const { selectedEnvironment } = useEnvironment();
   const servers = inventory.filter((env) => env.type === "docker");
 
@@ -63,7 +232,10 @@ export default function TemplatesPage() {
   const { showNotification } = useNotification();
 
   useEffect(() => {
-    if (selectedEnvironment?.type === "docker" && selectedEnvironment.id !== selectedServerId) {
+    if (
+      selectedEnvironment?.type === "docker" &&
+      selectedEnvironment.id !== selectedServerId
+    ) {
       setSelectedServerId(selectedEnvironment.id);
       return;
     }
@@ -87,8 +259,14 @@ export default function TemplatesPage() {
     setPage(1);
   }, [searchQuery]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredTemplates.length / PAGE_SIZE));
-  const pagedTemplates = filteredTemplates.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredTemplates.length / PAGE_SIZE),
+  );
+  const pagedTemplates = filteredTemplates.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE,
+  );
 
   const deployTemplate = (template: TemplateItem) => {
     if (!selectedServerId) {
@@ -116,9 +294,10 @@ export default function TemplatesPage() {
           showNotification({
             type: "success",
             message: "Application deployed",
-            description: presetEnv.autofilled.length > 0
-              ? `${template.title} deployed as ${result.container_id}. Auto-filled: ${presetEnv.autofilled.join(", ")}`
-              : `${template.title} deployed as ${result.container_id}`,
+            description:
+              presetEnv.autofilled.length > 0
+                ? `${template.title} deployed as ${result.container_id}. Auto-filled: ${presetEnv.autofilled.join(", ")}`
+                : `${template.title} deployed as ${result.container_id}`,
           });
         },
         onError: (error: any) => {
@@ -135,7 +314,7 @@ export default function TemplatesPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20">
-      <div className="rounded-3xl border border-zinc-200 bg-white/95 p-6 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
+      <div className="rounded-md border border-zinc-200 bg-white/95 p-6 shadow-sm dark:border-zinc-800 dark:bg-[#121212]">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div className="max-w-3xl">
             <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
@@ -143,7 +322,8 @@ export default function TemplatesPage() {
               App Templates
             </h1>
             <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-              Launch common application stacks faster, then jump into advanced deploy when you need more control.
+              Launch common application stacks faster, then jump into advanced
+              deploy when you need more control.
             </p>
           </div>
 
@@ -154,9 +334,11 @@ export default function TemplatesPage() {
                 value={selectedServerId}
                 onChange={(e) => setSelectedServerId(e.target.value)}
                 disabled={isLoadingServers}
-                className="h-11 w-full min-w-0 cursor-pointer appearance-none rounded-xl border border-zinc-200 bg-white pl-9 pr-8 text-[13px] font-medium text-zinc-900 shadow-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-[#121212] dark:text-zinc-100"
+                className="h-11 w-full min-w-0 cursor-pointer appearance-none rounded-md border border-zinc-200 bg-white pl-9 pr-8 text-[13px] font-medium text-zinc-900 shadow-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-[#121212] dark:text-zinc-100"
               >
-                <option value="" disabled>Select Docker environment...</option>
+                <option value="" disabled>
+                  Select Docker environment...
+                </option>
                 {servers.map((server) => (
                   <option key={server.id} value={server.id}>
                     {server.name} ({server.url})
@@ -165,7 +347,12 @@ export default function TemplatesPage() {
               </select>
             </div>
 
-            <Button variant="primary" size="md" className="h-11" onClick={() => navigate("/templates/custom")}>
+            <Button
+              variant="primary"
+              size="md"
+              className="h-11"
+              onClick={() => navigate("/templates/custom")}
+            >
               <Code className="mr-2 h-4 w-4" />
               Custom Templates
             </Button>
@@ -183,8 +370,15 @@ export default function TemplatesPage() {
             />
           </div>
           <div className="text-sm text-zinc-500 dark:text-zinc-400">
-            Showing <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pagedTemplates.length}</span> of{" "}
-            <span className="font-semibold text-zinc-900 dark:text-zinc-100">{filteredTemplates.length}</span> templates
+            Showing{" "}
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+              {pagedTemplates.length}
+            </span>{" "}
+            of{" "}
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+              {filteredTemplates.length}
+            </span>{" "}
+            templates
           </div>
         </div>
       </div>
@@ -193,7 +387,7 @@ export default function TemplatesPage() {
         {pagedTemplates.map((template) => (
           <div
             key={template.title}
-            className="group flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-950/40 dark:hover:border-indigo-700/50"
+            className="group flex h-full flex-col rounded-md border border-zinc-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-950/40 dark:hover:border-indigo-700/50"
           >
             <div className="mb-4 flex items-start gap-3">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-zinc-100 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-800/40">
@@ -234,7 +428,10 @@ export default function TemplatesPage() {
                 disabled={createContainer.isPending}
               >
                 <Play className="mr-2 h-4 w-4" />
-                {createContainer.isPending && deployingTemplateTitle === template.title ? "Deploying..." : "Deploy Application"}
+                {createContainer.isPending &&
+                deployingTemplateTitle === template.title
+                  ? "Deploying..."
+                  : "Deploy Application"}
               </Button>
               <Button
                 variant="ghost"
@@ -255,21 +452,41 @@ export default function TemplatesPage() {
         {pagedTemplates.length === 0 ? (
           <div className="col-span-full flex h-72 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800">
             <LayoutTemplate className="mb-3 h-8 w-8 text-zinc-400 dark:text-zinc-600" />
-            <h3 className="mb-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">No templates found</h3>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">Try another search term.</p>
+            <h3 className="mb-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+              No templates found
+            </h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Try another search term.
+            </p>
           </div>
         ) : null}
       </div>
 
       {totalPages > 1 ? (
         <div className="flex items-center justify-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page === 1}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+            disabled={page === 1}
+          >
             Previous
           </Button>
           <div className="rounded-full border border-zinc-200 px-4 py-2 text-sm text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">
-            Page <span className="font-semibold text-zinc-900 dark:text-zinc-100">{page}</span> / {totalPages}
+            Page{" "}
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+              {page}
+            </span>{" "}
+            / {totalPages}
           </div>
-          <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page === totalPages}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              setPage((current) => Math.min(totalPages, current + 1))
+            }
+            disabled={page === totalPages}
+          >
             Next
           </Button>
         </div>

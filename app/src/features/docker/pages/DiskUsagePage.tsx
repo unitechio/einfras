@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { HardDrive, Info, Trash2, RefreshCw } from "lucide-react";
-import { useDockerDiskUsage } from "../api/useDockerHooks";
+import { useDockerDiskUsage, useReclaimDiskSpace } from "../api/useDockerHooks";
 import { useEnvironment } from "@/core/EnvironmentContext";
 import { Card } from "@/shared/ui/Card";
 import { Badge } from "@/shared/ui/Badge";
@@ -19,6 +19,14 @@ export default function DiskUsagePage() {
   const { data, isLoading, refetch, isFetching } = useDockerDiskUsage(
     selectedEnvironment?.id || ""
   );
+  const reclaimMutation = useReclaimDiskSpace(selectedEnvironment?.id || "");
+
+  const handleReclaim = async () => {
+    if (!selectedEnvironment?.id) return;
+    if (confirm("Are you sure you want to reclaim space? This will remove all unused containers, networks, unreferenced images, and disconnected volumes. This action is not reversible.")) {
+      await reclaimMutation.mutateAsync();
+    }
+  };
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return "0 B";
@@ -174,9 +182,17 @@ export default function DiskUsagePage() {
           <p className="text-xs text-zinc-400 max-w-[200px]">
             Removing unused containers, images, and networks can free up significant disk space.
           </p>
-          <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20">
-            <Trash2 className="w-4 h-4 mr-2" />
-            Reclaim space
+          <Button 
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20"
+            onClick={handleReclaim}
+            disabled={reclaimMutation.isPending || isLoading || data?.reclaimable === 0}
+          >
+            {reclaimMutation.isPending ? (
+              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4 mr-2" />
+            )}
+            {reclaimMutation.isPending ? "Reclaiming..." : "Reclaim space"}
           </Button>
         </Card>
       </div>

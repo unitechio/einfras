@@ -69,28 +69,62 @@ export default function ServerAuditLogs() {
         </Button>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-[13px] font-bold uppercase tracking-wider text-zinc-500">From:</span>
-          <Input type="datetime-local" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
+      {/* Compact single-row filter bar */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-zinc-200/60 bg-white px-3 py-2 shadow-sm dark:border-zinc-800/60 dark:bg-[#121212]">
+        {/* From */}
+        <div className="flex items-center gap-1.5">
+          <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">From</span>
+          <input
+            type="datetime-local"
+            value={fromDate}
+            onChange={(event) => setFromDate(event.target.value)}
+            className="h-8 rounded-lg border border-zinc-200/70 bg-zinc-50 px-2 text-[12px] text-zinc-700 outline-none transition focus:border-emerald-400/60 dark:border-zinc-800/70 dark:bg-zinc-900 dark:text-zinc-200"
+          />
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[13px] font-bold uppercase tracking-wider text-zinc-500">To:</span>
-          <Input type="datetime-local" value={toDate} onChange={(event) => setToDate(event.target.value)} />
+
+        <span className="text-zinc-300 dark:text-zinc-700 select-none">–</span>
+
+        {/* To */}
+        <div className="flex items-center gap-1.5">
+          <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">To</span>
+          <input
+            type="datetime-local"
+            value={toDate}
+            onChange={(event) => setToDate(event.target.value)}
+            className="h-8 rounded-lg border border-zinc-200/70 bg-zinc-50 px-2 text-[12px] text-zinc-700 outline-none transition focus:border-emerald-400/60 dark:border-zinc-800/70 dark:bg-zinc-900 dark:text-zinc-200"
+          />
         </div>
+
+        <span className="hidden h-5 w-px bg-zinc-200 dark:bg-zinc-800 sm:block" />
+
+        {/* Policy decision */}
         <select
           value={policyDecision}
           onChange={(event) => setPolicyDecision(event.target.value)}
-          className="h-9 rounded-md border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+          className="h-8 rounded-lg border border-zinc-200/70 bg-zinc-50 px-2 text-[12px] text-zinc-700 outline-none transition focus:border-emerald-400/60 dark:border-zinc-800/70 dark:bg-zinc-900 dark:text-zinc-200"
         >
-          <option value="">All policy decisions</option>
+          <option value="">All decisions</option>
           <option value="allow">Allow</option>
           <option value="deny">Deny</option>
         </select>
-        <Input value={actionFilter} onChange={(event) => setActionFilter(event.target.value)} placeholder="Filter action" className="max-w-[220px]" />
-        <div className="relative">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
-          <Input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search logs..." className="w-full pl-10 md:w-64" />
+
+        {/* Action filter */}
+        <input
+          value={actionFilter}
+          onChange={(event) => setActionFilter(event.target.value)}
+          placeholder="Filter action…"
+          className="h-8 w-36 rounded-lg border border-zinc-200/70 bg-zinc-50 px-2 text-[12px] text-zinc-700 outline-none transition focus:border-emerald-400/60 dark:border-zinc-800/70 dark:bg-zinc-900 dark:text-zinc-200"
+        />
+
+        {/* Search */}
+        <div className="relative ml-auto">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" size={13} />
+          <input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Search logs…"
+            className="h-8 w-48 rounded-lg border border-zinc-200/70 bg-zinc-50 pl-8 pr-2 text-[12px] text-zinc-700 outline-none transition focus:border-emerald-400/60 dark:border-zinc-800/70 dark:bg-zinc-900 dark:text-zinc-200 md:w-56"
+          />
         </div>
       </div>
 
