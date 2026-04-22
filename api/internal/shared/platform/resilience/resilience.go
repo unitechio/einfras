@@ -122,9 +122,9 @@ type CircuitBreaker struct {
 	name string
 
 	// config
-	failureThreshold  int           // failures before opening
-	successThreshold  int           // successes in half-open before closing
-	resetTimeout      time.Duration // open → half-open transition
+	failureThreshold int           // failures before opening
+	successThreshold int           // successes in half-open before closing
+	resetTimeout     time.Duration // open → half-open transition
 
 	// state (all atomic / mutex-protected)
 	state         atomic.Int32
@@ -248,7 +248,7 @@ func (cb *CircuitBreaker) State() CBState { return CBState(cb.state.Load()) }
 // Bulkhead limits concurrent operations per resource (server).
 // This prevents one misbehaving server from consuming all goroutines.
 type Bulkhead struct {
-	sem chan struct{}
+	sem  chan struct{}
 	name string
 }
 
